@@ -1,0 +1,24 @@
+From 65f4bea375e72d4abf44a895b7ff28abb5c8c277 Mon Sep 17 00:00:00 2001
+From: Marc Hanheide <marc@hanheide.net>
+Date: Sun, 30 Aug 2015 13:29:32 +0100
+Subject: [PATCH] made this to build Release builds
+
+---
+ debian/rules.em |    1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/debian/rules.em b/debian/rules.em
+index 06777bd..a90f82b 100755
+--- a/debian/rules.em
++++ b/debian/rules.em
+@@ -25,6 +25,7 @@ override_dh_auto_configure:
+ 	# set things like CMAKE_PREFIX_PATH, PKG_CONFIG_PATH, and PYTHONPATH.
+ 	if [ -f "@(InstallationPrefix)/setup.sh" ]; then . "@(InstallationPrefix)/setup.sh"; fi && \
+ 	dh_auto_configure -- \
++		-DCMAKE_BUILD_TYPE=Release \
+ 		-DCATKIN_BUILD_BINARY_PACKAGE="1" \
+ 		-DCMAKE_INSTALL_PREFIX="@(InstallationPrefix)" \
+ 		-DCMAKE_PREFIX_PATH="@(InstallationPrefix)"
+-- 
+1.7.9.5
+
