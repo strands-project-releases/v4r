@@ -239,24 +239,22 @@ namespace v4r
         boost::split (strs, filename, boost::is_any_of ("/\\"));
         std::string name = strs[strs.size () - 1];
 
-        std::stringstream ss;
-        for (int i = 0; i < (static_cast<int> (strs.size ()) - 1); i++)
-        {
-          ss << strs[i];
-          if (i != (static_cast<int> (strs.size ()) - 1))
-          ss << "/";
-        }
+//        std::stringstream ss;
+//        for (int i = 0; i < (static_cast<int> (strs.size ()) - 1); i++)
+//        {
+//          ss << strs[i];
+////          if (i != (static_cast<int> (strs.size ()) - 1))
+////          ss << "/";
+//        }
 
-        classname = ss.str ();
+        classname = strs[0];
         id = name.substr (0, name.length () - 4);
       }
 
       void
       createTrainingDir (const std::string & training_dir)
       {
-        bf::path trained_dir = training_dir;
-        if (!bf::exists (trained_dir))
-            bf::create_directories (training_dir);
+        v4r::io::createDirIfNotExist(training_dir);
       }
 
       void
@@ -422,25 +420,6 @@ namespace v4r
         return models_;
       }
 
-      void getFeaturesFromFile(const std::string &filename, const std::vector<float> &feature_vector)
-      {
-          if (!bf::exists (filename))
-          {
-              std::cout << "Cannot find a file under " << filename << ". Features cannot be loaded. " << std::endl;
-          }
-          else
-          {
-            //boost::numeric::ublas::matrix<double> m;
-            //std::ifstream s(filename);
-
-            //if (!s >> m)
-            //{
-            //    std::cout << "Failed to write to matrix" << std::endl;
-            //    return 1;
-            //}
-          }
-      }
-
       bool
       isModelAlreadyTrained (const ModelT m, const std::string & base_dir, const std::string & descr_name)
       {
@@ -497,7 +476,8 @@ namespace v4r
         path_ = path;
       }
 
-      void setLoadViews(bool load) {
+      void setLoadViews(bool load)
+      {
         load_views_ = load;
       }
 

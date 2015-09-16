@@ -1,4 +1,4 @@
-SET(RTMT_DEPS v4r_core v4r_registration v4r_io v4r_common v4r_features v4r_keypoints v4r_reconstruction v4r_recognition siftgpu edt ceres)
+SET(RTMT_DEPS v4r_core v4r_registration v4r_io v4r_common v4r_features v4r_keypoints v4r_reconstruction v4r_recognition edt ceres)
 v4r_check_dependencies(${RTMT_DEPS})
 
 if(NOT V4R_DEPENDENCIES_FOUND)
@@ -23,11 +23,6 @@ if(HAVE_OPENCV)
   list(APPEND DEP_LIBS ${OPENCV_LIBRARIES})
 endif()
 
-if(HAVE_SIFTGPU)
-  v4r_include_directories(${SIFTGPU_INCLUDE_DIRS})
-  list(APPEND DEP_LIBS ${SIFTGPU_LIBRARIES})
-endif()
-
 if(HAVE_EDT)
   v4r_include_directories(${EDT_INCLUDE_DIRS})
   list(APPEND DEP_LIBS ${EDT_LIBRARIES})
@@ -38,6 +33,11 @@ if(HAVE_GLM)
 else()
   message(***RTMT requires GLM*****)
   return()
+endif()
+
+if(HAVE_OPENGL)
+  v4r_include_directories(${OPENGL_INCLUDE_DIRS})
+  list(APPEND DEP_LIBS ${OPENGL_LIBRARIES})
 endif()
 
 if(HAVE_CERES)
@@ -114,7 +114,7 @@ message(STATUS "QT_LIBRARIES: ${QT_LIBRARIES}")
 
 include_directories(${CMAKE_CURRENT_BINARY_DIR} ${OPENNI2_INCLUDE_DIR})
 add_executable(RTMT ${SOURCES} ${HEADERS_MOC} ${FORMS_MOC})
-target_link_libraries(RTMT ${RTMT_DEPS} ${DEP_LIBS} ${QT_LIBRARIES} ${GL_LIBRARIES})
+target_link_libraries(RTMT ${RTMT_DEPS} ${DEP_LIBS} ${QT_LIBRARIES})
 
 INSTALL(TARGETS RTMT
   RUNTIME DESTINATION bin
