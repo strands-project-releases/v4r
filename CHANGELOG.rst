@@ -2,6 +2,13 @@
 Changelog for package v4r
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.0.9 (2015-09-17)
+------------------
+* Merge branch 'master' of github.com:strands-project/v4r
+* fix Bloom issue with umlauts
+* Merge remote-tracking branch 'strands/master'
+* Contributors: Thomas Fäulhammer
+
 1.0.8 (2015-09-17)
 ------------------
 * Merge pull request `#28 <https://github.com/strands-project/v4r/issues/28>`_ from strands-project/remove_c++11_flags_and_common_namespace
