@@ -1,4 +1,4 @@
-From 9659824bf3c209bf8bed52f75b56e5c2aefa940e Mon Sep 17 00:00:00 2001
+From d552d785ed239078100454bcce4be0f0480ccf6e Mon Sep 17 00:00:00 2001
 From: Marc Hanheide <marc@hanheide.net>
 Date: Sun, 30 Aug 2015 13:29:32 +0100
 Subject: [PATCH] made this to build Release builds
@@ -8,10 +8,10 @@ Subject: [PATCH] made this to build Release builds
  1 file changed, 1 insertion(+)
 
 diff --git a/debian/rules.em b/debian/rules.em
-index 06777bd..a90f82b 100755
+index 991c991..beadccc 100755
 --- a/debian/rules.em
 +++ b/debian/rules.em
-@@ -25,6 +25,7 @@ override_dh_auto_configure:
+@@ -28,6 +28,7 @@ override_dh_auto_configure:
  	# set things like CMAKE_PREFIX_PATH, PKG_CONFIG_PATH, and PYTHONPATH.
  	if [ -f "@(InstallationPrefix)/setup.sh" ]; then . "@(InstallationPrefix)/setup.sh"; fi && \
  	dh_auto_configure -- \
