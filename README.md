@@ -1,3 +1,24 @@
+## v4r (indigo) - 1.1.0-1
+
+The packages in the `v4r` repository were released into the `indigo` distro by running `/usr/bin/bloom-release --non-interactive -t indigo -r indigo v4r` on `Fri, 20 Nov 2015 16:28:13 -0000`
+
+The `v4r` package was released.
+
+Version of package(s) in repository `v4r`:
+- upstream repository: https://github.com/strands-project/v4r.git
+- release repository: https://github.com/strands-project-releases/v4r.git
+- rosdistro version: `1.0.11-5`
+- old version: `1.1.0-0`
+- new version: `1.1.0-1`
+
+Versions of tools used:
+- bloom version: `0.5.20`
+- catkin_pkg version: `0.2.10`
+- rosdep version: `0.11.2`
+- rosdistro version: `0.4.2`
+- vcstools version: `0.1.37`
+
+
 ## v4r (indigo) - 1.1.0-0
 
 The packages in the `v4r` repository were released into the `indigo` distro by running `/usr/bin/bloom-release --non-interactive -t indigo -r indigo v4r` on `Fri, 20 Nov 2015 16:26:57 -0000`
