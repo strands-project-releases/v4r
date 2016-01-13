@@ -590,12 +590,12 @@ v4r::PartialPCDSource<Full3DPointT, PointInT, OutModelPointT>::loadOrGenerate (c
       views_orig.push_back (filtered2);*/
 
       std::stringstream path_view;
-      path_view << direc << "/view_" << std::setfill ('0') << std::setw (8) << cam_id << ".pcd";
+      path_view << direc << "/" << view_prefix_ << std::setfill ('0') << std::setw (8) << cam_id << ".pcd";
       std::cout << filtered2->points.size() << std::endl;
       pcl::io::savePCDFileBinary (path_view.str (), *filtered2);
 
       std::stringstream path_pose;
-      path_pose << direc << "/pose_" << std::setfill ('0') << std::setw (8) << cam_id << ".txt";
+      path_pose << direc << "/" << pose_prefix_ << std::setfill ('0') << std::setw (8) << cam_id << ".txt";
       v4r::io::writeMatrixToFile( path_pose.str (), final_mat);
 
       /*std::stringstream path_entropy;
@@ -738,26 +738,20 @@ v4r::PartialPCDSource<Full3DPointT, PointInT, OutModelPointT>::loadInMemorySpeci
   model.views_.push_back (cloud);
 
   std::string file_replaced1 (model.view_filenames_[i]);
-  boost::replace_all (file_replaced1, "view", "pose");
+  boost::replace_all (file_replaced1, this->view_prefix_, this->pose_prefix_);
   boost::replace_all (file_replaced1, ".pcd", ".txt");
 
   std::string file_replaced2 (model.view_filenames_[i]);
-  boost::replace_all (file_replaced2, "view", "entropy");
+  boost::replace_all (file_replaced2, this->view_prefix_, this->entropy_prefix_);
   boost::replace_all (file_replaced2, ".pcd", ".txt");
-
-  //read pose as well
-  std::stringstream pose_file;
-  pose_file << pathmodel.str () << "/" << file_replaced1;
-
-  Eigen::Matrix4f pose;
-  v4r::io::readMatrixFromFile( pose_file.str (), pose);
+  Eigen::Matrix4f pose = v4r::io::readMatrixFromFile( pathmodel.str () + "/" + file_replaced1 );
 
   model.poses_.push_back (pose);
 
   if(gen_organized_)
   {
     std::string file_replaced3 (model.view_filenames_[i]);
-    boost::replace_all (file_replaced3, "view", "object_indices");
+    boost::replace_all (file_replaced3, this->view_prefix_, this->indices_prefix_);
     pcl::PointCloud<IndexPoint> obj_indices_cloud;
 
     std::stringstream oi_file;
@@ -786,7 +780,7 @@ v4r::PartialPCDSource<Full3DPointT, PointInT, OutModelPointT>::assembleModelFrom
     pcl::copyPointCloud(*(model.views_[i]), indices[i], *global_cloud_only_indices);
     typename pcl::PointCloud<PointInT>::Ptr global_cloud(new pcl::PointCloud<PointInT>);
     pcl::transformPointCloud(*global_cloud_only_indices,*global_cloud, inv);
-    *(model_cloud) += *global_cloud;
+    *model_cloud += *global_cloud;
   }
 }
 
@@ -813,7 +807,7 @@ v4r::PartialPCDSource<Full3DPointT, PointInT, OutModelPointT>::loadInMemorySpeci
     std::string pose_fn (view_file);
     boost::replace_last (pose_fn, "view", "pose");
     boost::replace_last (pose_fn, ".pcd", ".txt");
-    v4r::io::readMatrixFromFile( pose_fn, model.poses_[i]);
+    model.poses_[i] = v4r::io::readMatrixFromFile( pose_fn);
 
     std::string entropy_fn (view_file);
     boost::replace_last (entropy_fn, "view", "entropy");
