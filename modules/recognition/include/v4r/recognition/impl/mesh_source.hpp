@@ -22,7 +22,7 @@ template<typename PointT>
 void
 MeshSource<PointT>::loadOrGenerate (const std::string & model_path, ModelT & model)
 {
-    const std::string views_path = path_ + "/" + model.class_ + "/" + model.id_;
+    const std::string views_path = path_ + "/" + model.class_ + "/" + model.id_ + "/views";
 
     model.views_.clear();
     model.poses_.clear();
@@ -36,7 +36,7 @@ MeshSource<PointT>::loadOrGenerate (const std::string & model_path, ModelT & mod
     if (v4r::io::existsFolder(views_path))
     {
         if(load_into_memory_) {
-            model.view_filenames_ = v4r::io::getFilesInDirectory(views_path, ".*view_.*.pcd", false);
+            model.view_filenames_ = v4r::io::getFilesInDirectory(views_path, ".*" + view_prefix_ + ".*.pcd", false);
             loadInMemorySpecificModel(model);
         }
     }
@@ -45,22 +45,24 @@ MeshSource<PointT>::loadOrGenerate (const std::string & model_path, ModelT & mod
         int img_width = resolution_;
         int img_height = resolution_;
 
+        if(!renderer_)
+            renderer_.reset( new DepthmapRenderer(img_width, img_height) );
+
         // To preserve Kinect camera parameters (640x480 / f=525)
         const float f = 150.f;
         const float cx = img_width / 2.f;
         const float cy = img_height / 2.f;
-        DepthmapRenderer renderer(img_width, img_height);
-        renderer.setIntrinsics(f, f, cx, cy);
+        renderer_->setIntrinsics(f, f, cx, cy);
         DepthmapRendererModel rmodel(model_path);
-        renderer.setModel(&rmodel);
+        renderer_->setModel(&rmodel);
 
-        std::vector<Eigen::Vector3f> sphere = renderer.createSphere(radius_sphere_, tes_level_);
+        std::vector<Eigen::Vector3f> sphere = renderer_->createSphere(radius_sphere_, tes_level_);
 
         for(const Eigen::Vector3f &point : sphere) {
-            Eigen::Matrix4f orientation = renderer.getPoseLookingToCenterFrom(point); //get a camera pose looking at the center:
-            renderer.setCamPose(orientation);
+            Eigen::Matrix4f orientation = renderer_->getPoseLookingToCenterFrom(point); //get a camera pose looking at the center:
+            renderer_->setCamPose(orientation);
             float visible;
-            typename pcl::PointCloud<PointT>::Ptr cloud (new pcl::PointCloud<PointT>(renderCloud(renderer, visible)));
+            typename pcl::PointCloud<PointT>::Ptr cloud (new pcl::PointCloud<PointT>(renderCloud(*renderer_, visible)));
             const Eigen::Matrix4f tf = v4r::RotTrans2Mat4f(cloud->sensor_orientation_, cloud->sensor_origin_);
 
             // reset view point otherwise pcl visualization is potentially messed up
@@ -114,7 +116,7 @@ template<typename PointT>
 void
 MeshSource<PointT>::loadInMemorySpecificModel(ModelT & model)
 {
-    const std::string pathmodel = path_ + "/" + model.class_ + "/" + model.id_;
+    const std::string pathmodel = path_ + "/" + model.class_ + "/" + model.id_ + "/views";
 
     model.poses_.resize( model.view_filenames_.size() );
     model.views_.resize( model.view_filenames_.size() );
