@@ -1,4 +1,4 @@
-From 40a22981f7ca755f8cfd380b8b27a13b4ee7edc7 Mon Sep 17 00:00:00 2001
+From 3443aa264b7c08bef2843bd546f3c68a44780282 Mon Sep 17 00:00:00 2001
 From: Marc Hanheide <marc@hanheide.net>
 Date: Sun, 30 Aug 2015 13:29:32 +0100
 Subject: [PATCH] made this to build Release builds
