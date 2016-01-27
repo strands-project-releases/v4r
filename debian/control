@@ -1,0 +1,12 @@
+Source: ros-indigo-v4r
+Section: misc
+Priority: extra
+Maintainer: Thomas Faeulhammer <faeulhammer@acin.tuwien.ac.at>
+Build-Depends: debhelper (>= 9.0.0), cmake, freeglut3-dev, libassimp-dev, libboost-all-dev, libceres-dev, libdevil-dev, libglew-dev, libglm-dev, libgoogle-glog-dev, libopencv-dev, libopenni-dev, libopenni-sensor-primesense-dev, libopenni2-dev, libpcl-1.7-all-dev, libqt4-dev, libqt4-opengl-dev, libsuitesparse-dev, libsvm-dev, libx11-dev, libxi-dev, libxinerama-dev, libxrandr-dev
+Homepage: https://github.com/strands-project/v4r
+Standards-Version: 3.9.2
+
+Package: ros-indigo-v4r
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, freeglut3-dev, libassimp-dev, libceres-dev, libdevil-dev, libglew-dev, libglm-dev, libgoogle-glog-dev, libopencv-dev, libopenni-dev, libopenni-sensor-primesense-dev, libopenni2-dev, libpcl-1.7-all-dev, libqt4-dev, libqt4-opengl-dev, libsvm-dev, libx11-dev, libxi-dev, libxinerama-dev, libxrandr-dev
+Description: The Vision for Robotics Library of ACIN TUW (open source STRANDS version)
