@@ -2,6 +2,9 @@
 Changelog for package v4r
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
+1.4.3 (2016-02-26)
+------------------
+
 1.4.2 (2016-02-26)
 ------------------
 * Merge pull request `#60 <https://github.com/strands-project/v4r/issues/60>`_ from strands-project/strands
