@@ -1,272 +1,246 @@
+#include <v4r/common/miscellaneous.h>
 #include <v4r/io/filesystem.h>
+#include <v4r/ml/ml_utils.h>
 #include <v4r/ml/svmWrapper.h>
 #include <iostream>
-
+#include <fstream>
+#include <set>
+#include <glog/logging.h>
 
 namespace v4r
 {
-bool svmSortOp (svmData i, svmData j) ;
 
-bool svmSortOp (svmData i, svmData j) { return (i.y<j.y); }
+void svmClassifier::predict(const Eigen::MatrixXf &query_data, Eigen::MatrixXi &predicted_label) const
+{
+    int num_examples = query_data.rows();
+    int num_attributes = query_data.cols();
 
-    void svmWrapper::initSVM()
+    if(param_.svm_.probability)
+        predicted_label.resize(num_examples, param_.knn_);
+    else
+        predicted_label.resize(num_examples, 1);
+
+    Eigen::MatrixXf query_data_scaled = query_data;
+
+    if(param_.do_scaling_)
     {
-        svm_para_.svm_type = ::C_SVC;
-        svm_para_.kernel_type = ::RBF;
-        //svm_para->degree = 2;
-        svm_para_.gamma = 0.01;// default 1/k;
-        //svm_para->coef0 = 1;
-
-        svm_para_.cache_size = 100;
-        svm_para_.eps = 0.001;
-        svm_para_.C = 10;
-        svm_para_.nr_weight = 0;
-        svm_para_.weight_label = NULL;
-        svm_para_.weight = NULL;
-        //svm_para->nu = 0.5;
-        //svm_para->p = 1;
-        svm_para_.shrinking = 1;
-        svm_para_.probability = 1;
+        for(int row = 0 ; row < num_examples; row++)
+        {
+            query_data_scaled.row(row).array() *= scale_.array();
+        }
     }
 
-    void svmWrapper::computeConfusionMatrix( const std::vector<double> &target_pred,
-                                               const std::vector<double> &target_test,
-                                               cv::Mat &confusion_matrix)
+
+    for(int i=0; i<num_examples; i++)
     {
-        if(target_pred.size() != target_test.size())
+        ::svm_node *svm_n_test = new ::svm_node[ num_attributes+1 ];
+
+        for(int kk=0; kk<num_attributes; kk++)
         {
-            std::cerr << "The target vectors of the predicted and actual classes do not have the same size."
-                       <<  "Cannot calculate confusion matrix... " << std::endl;
+            svm_n_test[kk].value = query_data_scaled(i, kk);
+            svm_n_test[kk].index = kk+1;
+        }
+        svm_n_test[ num_attributes ].index = -1;
+
+        if(param_.svm_.probability)
+        {
+            double *prob_estimates;
+            try
+            {
+                prob_estimates = new double[ svm_mod_->nr_class ];
+            }
+            catch (std::bad_alloc&)
+            {
+                std::cerr << "Error allocating memory " << std::endl;
+            }
+
+            double bla = svm_predict_probability(svm_mod_, svm_n_test, prob_estimates);
+            (void) bla;
+
+            std::vector<double> probs ( svm_mod_->nr_class );
+            for(int label_id=0; label_id<svm_mod_->nr_class; label_id++)
+                probs[label_id] = prob_estimates[label_id];
+
+            std::vector<size_t> indices = sort_indexes(probs);  //NOTE sorted in ascending order. We want highest values!
+
+            for(int k=0; k<param_.knn_; k++)
+                predicted_label(i, k) = indices[ indices.size() - 1 - k ];
+
+            delete [] prob_estimates;
         }
         else
         {
-            confusion_matrix = cv::Mat::zeros(num_classes_, num_classes_, CV_16U);
+            predicted_label(i, 0) = (int)::svm_predict(svm_mod_, svm_n_test);
+        }
 
-            for(size_t i=0; i< target_pred.size(); i++)
+        delete [] svm_n_test;
+    }
+}
+
+void svmClassifier::train(const Eigen::MatrixXf &training_data, const Eigen::VectorXi & training_label)
+{
+    CHECK(training_data.rows() == training_label.rows() );
+
+    int num_examples = training_data.rows();
+    int num_attributes = training_data.cols();
+
+    if (param_.svm_.gamma < 0)
+        param_.svm_.gamma = 1. / num_attributes;
+
+    if( !param_.svm_.probability && param_.knn_ > 1)
+    {
+        LOG(WARNING) << "KNN set with k>1 but probability estimate is turned off. Will turn on SVM probability to estimate not only winner.";
+        param_.svm_.probability = 1;
+    }
+
+    Eigen::MatrixXf training_data_scaled = training_data;
+    if(param_.do_scaling_)
+    {
+        scale_ = Eigen::VectorXf::Ones( num_attributes );
+//        offset_ = Eigen::VectorXf::Zero( num_attributes );
+
+        const Eigen::VectorXf maxa = training_data.colwise().maxCoeff();
+        const Eigen::VectorXf mina = Eigen::VectorXf::Zero( num_attributes );//training_data.colwise().minCoeff();
+        const Eigen::VectorXf range = maxa - mina;
+
+        for(int attr_id = 0 ; attr_id < num_attributes; attr_id++)
+        {
+            if (range(attr_id) > std::numeric_limits<float>::epsilon())
             {
-                confusion_matrix.at<unsigned short>(target_test[i], target_pred[i]) ++;
+                scale_(attr_id) = 1.f/range(attr_id);
             }
+        }
+
+        for(int row = 0 ; row < num_examples; row++)
+        {
+            training_data_scaled.row(row).array() *= scale_.array();
         }
     }
 
 
-    void svmWrapper::SVMpredictTarget( const std::vector<std::vector<double> > & data_test,
-                                         std::vector<double> &target_pred)
+    // fill training data into an SVM problem
+    ::svm_problem *svm_prob = new ::svm_problem;
+    svm_prob->l = num_examples; //number of training examples
+    svm_prob->x = new ::svm_node *[svm_prob->l];
+
+    for(int i = 0; i<svm_prob->l; i++)
+        svm_prob->x[i] = new ::svm_node[ num_attributes+1 ];  // add one additional dimension and set that index to -1 (libsvm requirement)
+
+    svm_prob->y = new double[svm_prob->l];
+
+    for(int i=0; i<svm_prob->l; i++)
     {
-        target_pred.resize (data_test.size());
-
-        for(size_t i=0; i<data_test.size(); i++)
+        for(int kk=0; kk < num_attributes; kk++)
         {
-            ::svm_node *svm_n_test = new ::svm_node[data_test[i].size()+1];
-
-            for(size_t kk=0; kk<data_test[i].size(); kk++)
-            {
-                svm_n_test[kk].value = data_test[i][kk];
-                svm_n_test[kk].index = kk+1;
-            }
-            svm_n_test[data_test[i].size()].index = -1;
-            target_pred[i] = ::svm_predict(svm_mod_, svm_n_test);
+            svm_prob->x[i][kk].value = (double)training_data_scaled(i,kk);
+            svm_prob->x[i][kk].index = kk+1;
         }
+        svm_prob->x[i][ num_attributes ].index = -1;
+        svm_prob->y[i] = training_label(i);
     }
 
-
-    void svmWrapper::testSVM(const std::vector<std::vector<double> > & data_test,
-                                 const std::vector<double> &target_actual,
-                                 std::vector<double> &target_pred,
-                                 cv::Mat &confusion_matrix)
+    if(v4r::io::existsFile(param_.filename_))
     {
-        size_t num_falsely_classified=0, num_correctly_classified=0;
-
-        target_pred.resize (data_test.size());
-
-        for(size_t i=0; i<data_test.size(); i++)
-        {
-            ::svm_node *svm_n_test = new ::svm_node[data_test[i].size()+1];
-
-            for(size_t kk=0; kk<data_test[i].size(); kk++)
-            {
-                svm_n_test[kk].value = data_test[i][kk];
-                svm_n_test[kk].index = kk+1;
-            }
-            svm_n_test[data_test[i].size()].index = -1;
-            double prob[num_classes_];
-            target_pred[i] = ::svm_predict_probability(svm_mod_, svm_n_test, prob);
-
-            if(target_actual.size()>i)
-            {
-                if(target_pred[i] == target_actual[i])
-                {
-                    num_correctly_classified++;
-                }
-                else
-                {
-                    num_falsely_classified++;
-                }
-            }
-        }
-        computeConfusionMatrix(target_pred, target_actual, confusion_matrix);
+        VLOG(1) << "Loading SVM model from file " << param_.filename_ << ".............";
+        loadModel( param_.filename_ );
+        LOG(INFO) << "Loaded SVM model from file " << param_.filename_;
     }
-
-    void svmWrapper::dokFoldCrossValidation(
-            const std::vector<std::vector<double> > &data_train,
-            const std::vector<double> &target_train,
-            size_t k,
-            double model_para_C_min,
-            double model_para_C_max,
-            double step_multiplicator_C,
-            double model_para_gamma_min,
-            double model_para_gamma_max,
-            double step_multiplicator_gamma)
+    else
     {
-        double bestC = model_para_C_min, bestGamma = model_para_gamma_min, bestTestPerformanceValue=0;
-        std::vector<cv::Mat> best_confusion_matrices_v(k);
-        std::vector<cv::Mat> confusion_matrices_v(k);
 
-        for(double C = model_para_C_min; C <= model_para_C_max; C *= step_multiplicator_C)
+        if( param_.do_cross_validation_ > 1 )
         {
-            for(double gamma = model_para_gamma_min; gamma <= model_para_gamma_max; gamma *= step_multiplicator_gamma)
+            LOG(INFO) << "Performing " << param_.do_cross_validation_ << "-fold cross validation.";
+            std::set<int> labels; // to know how many different labels there are
+            for(int i=0; i<training_label.rows(); i++)
             {
-                double avg_performance;
-                svm_para_.C = C;
-                svm_para_.gamma = gamma;
-                std::cout << "Computing svm for C=" << C << " and gamma=" << gamma << std::endl;
+                int label = training_label(i);
+                if( label > (int)labels.size()+1 )
+                    std::cerr << "Training labels are not sorted. Take care with unsorted training labels when using probabilities. The order will then correspond to the time of occurence in the training labels." << std::endl;
+                labels.insert(label);
+            }
 
-                for(size_t current_val_set_id = 0; current_val_set_id < k; current_val_set_id++)
+            size_t num_classes = labels.size();
+            float best_performance = std::numeric_limits<float>::min();
+            ::svm_parameter best_parameter = param_.svm_;
+
+            for(double C = param_.cross_validation_range_C_[0]; C <= param_.cross_validation_range_C_[1]; C *= param_.cross_validation_range_C_[2])
+            {
+                for(double gamma = param_.cross_validation_range_gamma_[0]; gamma <= param_.cross_validation_range_gamma_[1]; gamma *= param_.cross_validation_range_gamma_[2])
                 {
-                    std::vector<std::vector<double> > data_train_sub;
-                    std::vector<std::vector<double> > data_val;
-                    std::vector<double> target_train_sub;
-                    std::vector<double> target_val;
+                    param_.svm_.C = C;
+                    param_.svm_.gamma = gamma;
 
-                    for(size_t i=0; i < target_train.size(); i++)
+                    if( (param_.svm_.kernel_type == ::LINEAR) && (gamma>param_.cross_validation_range_gamma_[0]) )
                     {
-                        if(i%k == current_val_set_id)
-                        {
-                            data_val.push_back(data_train[i]);
-                            target_val.push_back(target_train[i]);
-                        }
-                        else
-                        {
-                            data_train_sub.push_back(data_train[i]);
-                            target_train_sub.push_back(target_train[i]);
-                        }
+                        VLOG(1) << "skipping remaing gamma values as linear kernel does not use gamma.";
+                        break;
                     }
-                    computeSvmModel(data_train_sub, target_train_sub);
-                    std::vector<double> target_pred;
-                    testSVM(data_val, target_val, target_pred, confusion_matrices_v[current_val_set_id]);
-                    std::cout << "confusion matrix ( " << current_val_set_id << ")" << std::endl << confusion_matrices_v[current_val_set_id] << std::endl;
-                }
 
-                cv::Mat total_confusion_matrix = cv::Mat::zeros(num_classes_, num_classes_, CV_16U);
-                for(size_t i=0; i< k; i++)
-                {
-                    total_confusion_matrix += confusion_matrices_v[i];
-                }
-                std::cout << "Total confusion matrix:" << std::endl << total_confusion_matrix << std::endl << std::endl;
+                    LOG(INFO) << "Cross-validate parameters C=" << param_.svm_.C << " and gamma=" << param_.svm_.gamma;
 
-                size_t sum=0;
-                size_t trace=0;
-                for(int i=0; i<total_confusion_matrix.rows; i++)
-                {
-                    for(int jj=0; jj<total_confusion_matrix.cols; jj++)
+                    double* target = (double*)malloc( svm_prob->l  * sizeof(double) );
+                    ::svm_cross_validation( svm_prob, &param_.svm_, param_.do_cross_validation_, target);
+
+                    Eigen::VectorXi predicted_label( svm_prob->l);
+
+                    for(int i=0; i <svm_prob->l; i++)
+                        predicted_label(i) = target[i ];
+
+                    Eigen::MatrixXi conf_matrix = computeConfusionMatrix( training_label, predicted_label.col(0), num_classes );
+                    float performance = (float)conf_matrix.trace() / conf_matrix.sum();
+
+                    LOG(INFO) << "Accuracy for parameters C=" << param_.svm_.C << " and gamma=" << param_.svm_.gamma << ": " << performance << " with confusion matrix: " << std::endl << conf_matrix << std::endl;
+
+                    if (performance > best_performance)
                     {
-                        sum += total_confusion_matrix.at<unsigned short>(i,jj);
-                        if (i == jj)
-                            trace += total_confusion_matrix.at<unsigned short>(i,jj);
+                        best_performance = performance;
+                        best_parameter = param_.svm_;
                     }
-                }
-                avg_performance = static_cast<double>(trace) / sum;
 
-                std::cout << "My average performance is " << avg_performance << std::endl;
-
-                if(avg_performance > bestTestPerformanceValue)
-                {
-                    bestTestPerformanceValue = avg_performance;
-                    bestC = C;
-                    bestGamma = gamma;
-                    for(size_t i=0; i<k; i++)
-                    {
-                        best_confusion_matrices_v[i] = confusion_matrices_v[i].clone();
-                        std::cout << "best confusion matrix ( " << i << ")" << std::endl << best_confusion_matrices_v[i] << std::endl;
-                    }
+                    delete[] target;
                 }
             }
-        }
-        svm_para_.C = bestC;
-        svm_para_.gamma = bestGamma;
 
-        cv::Mat confusion_matrix = cv::Mat::zeros(num_classes_, num_classes_, CV_16U);
-        for(size_t i=0; i< k; i++)
-        {
-            confusion_matrix += best_confusion_matrices_v[i];
-            std::cout << "Confusion matrix (part " << i << "/" << k << "): " << std::endl << best_confusion_matrices_v[i] << std::endl << std::endl;
+            param_.svm_ = best_parameter;
+            LOG(INFO) << "Best parameters achieved from cross-validation: C=" << param_.svm_.C << " and gamma=" << param_.svm_.gamma;
         }
-        std::cout << "I achieved the best performance(" << bestTestPerformanceValue<< ") for C=" << bestC <<
-                     " and gamma=" << bestGamma << ". " << std::endl <<
-                     "Total confusion matrix:" << std::endl << confusion_matrix << std::endl << std::endl;
+        std::ofstream ofparam("svm_param.txt");
+        ofparam << "C: " << param_.svm_.C << ", gamma: " << param_.svm_.gamma;
+        ofparam.close();
+
+        svm_mod_ = ::svm_train(svm_prob, &param_.svm_);
+
+    //    v4r::io::createDirForFileIfNotExist( filename );
+        this->saveModel( "model.svm");
+
     }
+    // free memory
+//    for(int i = 0; i<svm_prob->l; i++)
+//        delete [] svm_prob->x[i];
+//    delete [] svm_prob->x;
+//    delete [] svm_prob->y;
+//    delete svm_prob;
+}
 
-    void svmWrapper::computeSvmModel(const std::vector<std::vector<double> > &data_train,
-            const std::vector<double> &target_train, const std::string &filename)
+void svmClassifier::saveModel(const std::string &filename) const
+{
+    try
     {
-        ::svm_problem *svm_prob = new ::svm_problem;
-
-        svm_prob->l = data_train.size(); //number of training examples
-        svm_prob->x = new ::svm_node *[svm_prob->l];
-        for(int i = 0; i<svm_prob->l; i++)
-            svm_prob->x[i] = new ::svm_node[data_train[i].size()+1];  // add one additional dimension and set that index to -1 (libsvm requirement)
-        svm_prob->y = new double[svm_prob->l];
-
-        for(int i=0; i<svm_prob->l; i++)
-        {
-            for(size_t kk=0; kk<data_train[i].size(); kk++)
-            {
-                svm_prob->x[i][kk].value = data_train[i][kk];
-                svm_prob->x[i][kk].index = kk+1;
-                svm_prob->y[i] = target_train[i];
-            }
-            svm_prob->x[i][data_train[i].size()].index = -1;
-        }
-        svm_mod_ = ::svm_train(svm_prob, &svm_para_);
-
-        if(filename.length())
-        {
-            v4r::io::createDirForFileIfNotExist( filename );
-
-            if( ::svm_save_model(filename.c_str(), svm_mod_) == -1)
-                std::cerr << "Could not save svm model to file " << filename << ". " << std::endl;
-        }
+        ::svm_save_model(filename.c_str(), svm_mod_);
     }
-
-    void svmWrapper::shuffleTrainingData(std::vector<std::vector<double> > &data_train, std::vector<double> &target_train)
+    catch (std::exception& e)
     {
-        std::vector<size_t> vector_indices;
-        vector_indices.reserve(data_train.size());
-        for(size_t i=0; i<data_train.size(); i++)
-            vector_indices.push_back(i);
-        std::random_shuffle(vector_indices.begin(), vector_indices.end());
-        for(size_t i=0; i<data_train.size(); i++)
-        {
-            std::swap(data_train[i], data_train[vector_indices[i]]);
-            std::swap(target_train[i], target_train[vector_indices[i]]);
-        }
+        LOG(ERROR) << "Could not save svm model to file " << filename << ". ";
     }
+}
 
-    void svmWrapper::sortTrainingData(
-            std::vector<std::vector<double> > &data_train,
-            std::vector<double> &target_train)
-    {
-        std::vector<svmData> d(data_train.size());
-        for(size_t i=0; i<data_train.size(); i++)
-        {
-            d[i].x = data_train[i];
-            d[i].y = target_train[i];
-        }
-        std::sort(d.begin(),d.end(),svmSortOp);
-        for(size_t i=0; i<data_train.size(); i++)
-        {
-            data_train[i] = d[i].x;
-            target_train[i] = d[i].y;
-        }
-    }
+void svmClassifier::loadModel(const std::string &filename)
+{
+    if( !v4r::io::existsFile(filename) )
+        throw std::runtime_error("Given config file " + filename + " does not exist! Current working directory is " + boost::filesystem::current_path().string() + ".");
+
+    svm_mod_ = ::svm_load_model(filename.c_str());
+}
+
 }
