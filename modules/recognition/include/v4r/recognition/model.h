@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2013 Aitor Aldoma, Thomas Faeulhammer
+ * Copyright (c) 2016 Thomas Faeulhammer
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -22,20 +22,75 @@
  ******************************************************************************/
 
 
-#ifndef RECOGNITION_MODEL_H
-#define RECOGNITION_MODEL_H
+#pragma once
 
-#include <EDT/propagation_distance_field.h>
-#include <v4r/core/macros.h>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/mpl/at.hpp>
+#include <boost/mpl/map.hpp>
+#include <boost/serialization/vector.hpp>
 
 #include <pcl/common/centroid.h>
 #include <pcl/features/normal_3d_omp.h>
 #include <pcl/point_cloud.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/visualization/pcl_visualizer.h>
 
+#include <v4r/core/macros.h>
 
 namespace v4r
 {
+
+
+/**
+ * @brief class to describe a training view of the object model
+ * @author Thomas Faeulhammer
+ * @date Oct 2016
+ */
+template<typename PointT>
+class V4R_EXPORTS TrainingView
+{
+private:
+    friend class boost::serialization::access;
+
+    template<class Archive> void serialize(Archive & ar, const unsigned int version)
+    {
+        ar & cloud_;
+        ar & pose_;
+        ar & filename_;
+        ar & pose_filename_;
+        ar & indices_filename_;
+        ar & indices_;
+        ar & view_centroid_;
+    }
+
+public:
+      EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+    TrainingView()
+        : pose_(Eigen::Matrix4f::Identity()),
+          filename_(""),
+          pose_filename_(""),
+          indices_filename_(""),
+          view_centroid_(Eigen::Vector3f::Zero()),
+          self_occlusion_(0.f)
+    {}
+
+    typename pcl::PointCloud<PointT>::ConstPtr cloud_; ///< point cloud of view
+    typename pcl::PointCloud<pcl::Normal>::ConstPtr normals_; ///< normals for point cloud of view
+    Eigen::Matrix4f pose_; ///< corresponding camera pose (s.t. multiplying the individual clouds with these transforms bring it into a common coordinate system)
+    std::string filename_; ///< cloud filename of the training view
+    std::string pose_filename_; ///< pose filename of the training view
+    std::string indices_filename_; ///< object mask/indices filename of the training view
+    std::vector<int> indices_; ///< corresponding object indices
+    Eigen::Vector3f view_centroid_;  ///< centre of gravity for the 2.5D view of the model
+    float self_occlusion_; ///< self-occlusion of respective view
+    Eigen::Vector3f elongation_; ///< elongations in meter for each dimension
+    Eigen::Matrix4f eigen_pose_alignment_;
+
+    typedef boost::shared_ptr< TrainingView<PointT> > Ptr;
+    typedef boost::shared_ptr< TrainingView<PointT> const> ConstPtr;
+};
 
 /**
  * @brief Class representing a recognition model
@@ -43,185 +98,105 @@ namespace v4r
 template<typename PointT>
 class V4R_EXPORTS Model
 {
-  typedef typename pcl::PointCloud<PointT>::Ptr PointTPtr;
-  typedef typename pcl::PointCloud<PointT>::ConstPtr PointTPtrConst;
-  Eigen::Vector4f centroid_;
-  bool centroid_computed_;
+private:
+    mutable pcl::visualization::PCLVisualizer::Ptr vis_;
+    mutable int vp1_;
+
+    friend class boost::serialization::access;
+
+    template<class Archive> V4R_EXPORTS void serialize(Archive & ar, const unsigned int version)
+    {
+        ar & class_;
+        ar & id_;
+        if (normals_assembled_) ar & *normals_assembled_;
+        ar & centroid_;
+        ar & centroid_computed_;
+        ar & flip_normals_based_on_vp_;
+    }
+
+    typedef boost::mpl::map
+    <
+    boost::mpl::pair<pcl::PointXYZ,          pcl::PointNormal>,
+    boost::mpl::pair<pcl::PointNormal,       pcl::PointNormal>,
+    boost::mpl::pair<pcl::PointXYZRGB,       pcl::PointXYZRGBNormal>,
+    boost::mpl::pair<pcl::PointXYZRGBA,      pcl::PointXYZRGBNormal>,
+    boost::mpl::pair<pcl::PointXYZRGBNormal, pcl::PointXYZRGBNormal>,
+    boost::mpl::pair<pcl::PointXYZI,         pcl::PointXYZINormal>,
+    boost::mpl::pair<pcl::PointXYZINormal,   pcl::PointXYZINormal>
+    > PointTypeAssociations;
+    BOOST_MPL_ASSERT ((boost::mpl::has_key<PointTypeAssociations, PointT>));
+
+    typedef typename boost::mpl::at<PointTypeAssociations, PointT>::type PointTWithNormal;
 
 public:
-  std::vector<PointTPtr> views_;
-  std::vector<pcl::PointIndices> indices_;
-  std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> > poses_;
-  std::vector<float>  self_occlusions_;
-  std::string class_, id_;
-  PointTPtr assembled_;
-  pcl::PointCloud<pcl::Normal>::Ptr normals_assembled_;
-  std::vector <std::string> view_filenames_;
-  PointTPtr keypoints_; //model keypoints
-  pcl::PointCloud<pcl::Normal>::Ptr kp_normals_; //keypoint normals
-  mutable typename std::map<int, PointTPtrConst> voxelized_assembled_;
-  mutable typename std::map<int, pcl::PointCloud<pcl::Normal>::ConstPtr> normals_voxelized_assembled_;
-  //typename boost::shared_ptr<VoxelGridDistanceTransform<PointT> > dist_trans_;
-  typename boost::shared_ptr<distance_field::PropagationDistanceField<PointT> > dist_trans_;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  pcl::PointCloud<pcl::PointXYZL>::Ptr faces_cloud_labels_;
-  typename std::map<int, pcl::PointCloud<pcl::PointXYZL>::Ptr> voxelized_assembled_labels_;
-  bool flip_normals_based_on_vp_;
+    typedef typename pcl::PointCloud<PointT>::Ptr PointTPtr;
+    typedef typename pcl::PointCloud<PointT>::ConstPtr PointTPtrConst;
+    std::vector<typename TrainingView<PointT>::ConstPtr> views_;
+    std::string class_, id_;
+    Eigen::Vector4f minPoint_; ///< defines the 3D bounding box of the object model
+    Eigen::Vector4f maxPoint_; ///< defines the 3D bounding box of the object model
+    PointTPtr assembled_;
+    pcl::PointCloud<pcl::Normal>::Ptr normals_assembled_;
+    mutable typename std::map<int, PointTPtrConst> voxelized_assembled_;
+    mutable typename std::map<int, pcl::PointCloud<pcl::Normal>::ConstPtr> normals_voxelized_assembled_;
+    Eigen::Vector4f centroid_;    ///< centre of gravity for the whole 3d model
+    bool centroid_computed_;
 
-  Model()
-  {
-    centroid_computed_ = false;
-    flip_normals_based_on_vp_ = false;
-  }
+    pcl::PointCloud<pcl::PointXYZL>::Ptr faces_cloud_labels_;
+    typename std::map<int, pcl::PointCloud<pcl::PointXYZL>::Ptr> voxelized_assembled_labels_;
+    bool flip_normals_based_on_vp_;
 
-  bool getFlipNormalsBasedOnVP() const
-  {
-      return flip_normals_based_on_vp_;
-  }
+    Model() : centroid_computed_ (false), flip_normals_based_on_vp_ (false)
+    { }
 
-  void setFlipNormalsBasedOnVP(bool b)
-  {
-      flip_normals_based_on_vp_ = b;
-  }
-
-  Eigen::Vector4f getCentroid()
-  {
-    if(centroid_computed_)
-      return centroid_;
-
-    //compute
-    pcl::compute3DCentroid(*assembled_, centroid_);
-    centroid_[3] = 0.f;
-    centroid_computed_ = true;
-    return centroid_;
-  }
-
-  bool
-  operator== (const Model &other) const
-  {
-    return (id_ == other.id_) && (class_ == other.class_);
-  }
-
-  void computeNormalsAssembledCloud(float radius_normals) {
-    typename pcl::search::KdTree<PointT>::Ptr normals_tree (new pcl::search::KdTree<PointT>);
-    typedef typename pcl::NormalEstimationOMP<PointT, pcl::Normal> NormalEstimator_;
-    NormalEstimator_ n3d;
-    normals_assembled_.reset (new pcl::PointCloud<pcl::Normal> ());
-    normals_tree->setInputCloud (assembled_);
-    n3d.setRadiusSearch (radius_normals);
-    n3d.setSearchMethod (normals_tree);
-    n3d.setInputCloud (assembled_);
-    n3d.compute (*normals_assembled_);
-  }
-
-  pcl::PointCloud<pcl::PointXYZL>::Ptr
-  getAssembledSmoothFaces (int resolution_mm)
-  {
-    if(resolution_mm <= 0)
-      return faces_cloud_labels_;
-
-    typename std::map<int, pcl::PointCloud<pcl::PointXYZL>::Ptr>::iterator it = voxelized_assembled_labels_.find (resolution_mm);
-    if (it == voxelized_assembled_labels_.end ())
+    bool getFlipNormalsBasedOnVP() const
     {
-      double resolution = resolution_mm / (double)1000.f;
-      pcl::PointCloud<pcl::PointXYZL>::Ptr voxelized (new pcl::PointCloud<pcl::PointXYZL>);
-      pcl::VoxelGrid<pcl::PointXYZL> grid;
-      grid.setInputCloud (faces_cloud_labels_);
-      grid.setLeafSize (resolution, resolution, resolution);
-      grid.setDownsampleAllData(true);
-      grid.filter (*voxelized);
-
-      voxelized_assembled_labels_[resolution] = voxelized;
-      return voxelized;
+        return flip_normals_based_on_vp_;
     }
 
-    return it->second;
-  }
-
-  PointTPtrConst
-  getAssembled (int resolution_mm) const
-  {
-    if(resolution_mm <= 0)
-      return assembled_;
-
-    typename std::map<int, PointTPtrConst>::iterator it = voxelized_assembled_.find (resolution_mm);
-    if (it == voxelized_assembled_.end ())
+    void setFlipNormalsBasedOnVP(bool b)
     {
-      double resolution = (double)resolution_mm / 1000.f;
-      PointTPtr voxelized (new pcl::PointCloud<PointT>);
-      pcl::VoxelGrid<PointT> grid;
-      grid.setInputCloud (assembled_);
-      grid.setLeafSize (resolution, resolution, resolution);
-      grid.setDownsampleAllData(true);
-      grid.filter (*voxelized);
-
-      PointTPtrConst voxelized_const (new pcl::PointCloud<PointT> (*voxelized));
-      voxelized_assembled_[resolution] = voxelized_const;
-      return voxelized_const;
+        flip_normals_based_on_vp_ = b;
     }
 
-    return it->second;
-  }
-
-  pcl::PointCloud<pcl::Normal>::ConstPtr
-  getNormalsAssembled (int resolution_mm) const
-  {
-    if(resolution_mm <= 0)
-      return normals_assembled_;
-
-    typename std::map<int, pcl::PointCloud<pcl::Normal>::ConstPtr >::iterator it = normals_voxelized_assembled_.find (resolution_mm);
-    if (it == normals_voxelized_assembled_.end ())
+    bool
+    operator== (const Model &other) const
     {
-      double resolution = resolution_mm / 1000.f;
-      pcl::PointCloud<pcl::PointNormal>::Ptr voxelized (new pcl::PointCloud<pcl::PointNormal>);
-      pcl::PointCloud<pcl::PointNormal>::Ptr assembled_with_normals (new pcl::PointCloud<pcl::PointNormal>);
-      assembled_with_normals->points.resize(assembled_->points.size());
-      assembled_with_normals->width = assembled_->width;
-      assembled_with_normals->height = assembled_->height;
-
-      for(size_t i=0; i < assembled_->points.size(); i++) {
-        assembled_with_normals->points[i].getVector4fMap() = assembled_->points[i].getVector4fMap();
-        assembled_with_normals->points[i].getNormalVector4fMap() = normals_assembled_->points[i].getNormalVector4fMap();
-      }
-
-      pcl::VoxelGrid<pcl::PointNormal> grid;
-      grid.setInputCloud (assembled_with_normals);
-      grid.setLeafSize (resolution, resolution, resolution);
-      grid.setDownsampleAllData(true);
-      grid.filter (*voxelized);
-
-      pcl::PointCloud<pcl::Normal>::Ptr voxelized_const (new pcl::PointCloud<pcl::Normal> ());
-      voxelized_const->points.resize(voxelized->points.size());
-      voxelized_const->width = voxelized->width;
-      voxelized_const->height = voxelized->height;
-
-      for(size_t i=0; i < voxelized_const->points.size(); i++)
-        voxelized_const->points[i].getNormalVector4fMap() = voxelized->points[i].getNormalVector4fMap();
-
-
-      normals_voxelized_assembled_[resolution] = voxelized_const;
-      return voxelized_const;
+        return (id_ == other.id_) && (class_ == other.class_);
     }
 
-    return it->second;
-  }
+    /**
+     * @brief addTrainingView
+     * @param tv training view
+     */
+    void
+    addTrainingView(const typename TrainingView<PointT>::ConstPtr &tv)
+    {
+        views_.push_back( tv );
+    }
 
-  void
-  createVoxelGridAndDistanceTransform(int resolution_mm) {
-    double resolution = (double)resolution_mm / 1000.f;
-    PointTPtrConst assembled (new pcl::PointCloud<PointT> ());
-    assembled = getAssembled(resolution_mm);
-    dist_trans_.reset(new distance_field::PropagationDistanceField<PointT>(resolution));
-    dist_trans_->setInputCloud(assembled);
-    dist_trans_->compute();
-  }
+    std::vector<typename TrainingView<PointT>::ConstPtr >
+    getTrainingViews() const
+    {
+        return views_;
+    }
 
-  void
-  getVGDT(boost::shared_ptr<distance_field::PropagationDistanceField<PointT> > & dt) {
-    dt = dist_trans_;
-  }
+    pcl::PointCloud<pcl::PointXYZL>::Ptr getAssembledSmoothFaces (int resolution_mm);
+
+    typename pcl::PointCloud<PointT>::ConstPtr getAssembled(int resolution_mm) const;
+
+    /**
+     * @brief initialize initializes the model creating 3D models and so on
+     */
+    void
+    initialize(const std::string &model_filename = "");
+
+    pcl::PointCloud<pcl::Normal>::ConstPtr getNormalsAssembled (int resolution_mm) const;
+
+    typedef boost::shared_ptr< Model<PointT> > Ptr;
+    typedef boost::shared_ptr< Model<PointT> const> ConstPtr;
 };
 
 }
-
-#endif

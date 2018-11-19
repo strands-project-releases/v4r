@@ -33,10 +33,12 @@
 #ifndef _GRAB_PCD_PARAMS_H_
 #define _GRAB_PCD_PARAMS_H_
 
+#ifndef Q_MOC_RUN
 #include <QDialog>
 #include <opencv2/core/core.hpp>
 #include <Eigen/Dense>
 #include <v4r/reconstruction/KeypointSlamRGBD2.h>
+#endif
 
 
 namespace Ui {
@@ -55,7 +57,7 @@ public:
     c[0] = 320; c[1] = 240;
     width = 640;
     height = 480;
-    range[0] = 0.4; range[1] = 3.14;
+    range[0] = 0.1; range[1] = 3.14;
   }
 };
 

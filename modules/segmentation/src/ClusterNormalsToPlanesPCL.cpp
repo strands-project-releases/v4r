@@ -7,6 +7,7 @@
 
 #include <v4r/common/normals.h>
 #include <v4r/segmentation/ClusterNormalsToPlanesPCL.h>
+#include <pcl/filters/voxel_grid.h>
 #include <pcl/features/normal_3d.h>
 
 namespace v4r
@@ -16,7 +17,7 @@ using namespace std;
 
 template<typename PointT>
 void
-ClusterNormalsToPlanesPCL<PointT>::clusterNormals(const typename pcl::PointCloud<PointT>::Ptr &cloud, const pcl::PointCloud<pcl::Normal> &normals, size_t idx, typename ClusterNormalsToPlanesPCL<PointT>::Plane &plane)
+ClusterNormalsToPlanesPCL<PointT>::clusterNormals(const typename pcl::PointCloud<PointT>::ConstPtr &cloud, const pcl::PointCloud<pcl::Normal> &normals, size_t idx, typename ClusterNormalsToPlanesPCL<PointT>::Plane &plane)
 {
   mask_[idx] = false;
 
@@ -79,7 +80,7 @@ ClusterNormalsToPlanesPCL<PointT>::clusterNormals(const typename pcl::PointCloud
 
 template<typename PointT>
 void
-ClusterNormalsToPlanesPCL<PointT>::clusterNormalsUnorganized(const typename pcl::PointCloud<PointT>::Ptr &cloud, const pcl::PointCloud<pcl::Normal> &normals, size_t idx, typename ClusterNormalsToPlanesPCL<PointT>::Plane &plane)
+ClusterNormalsToPlanesPCL<PointT>::clusterNormalsUnorganized(const typename pcl::PointCloud<PointT>::ConstPtr &cloud, const pcl::PointCloud<pcl::Normal> &normals, size_t idx, typename ClusterNormalsToPlanesPCL<PointT>::Plane &plane)
 {
     mask_[idx] = false;
 
@@ -174,7 +175,7 @@ ClusterNormalsToPlanesPCL<PointT>::clusterNormalsUnorganized(const typename pcl:
  */
 template<typename PointT>
 void
-ClusterNormalsToPlanesPCL<PointT>::smoothClustering(const typename pcl::PointCloud<PointT>::Ptr &cloud, const pcl::PointCloud<pcl::Normal> &normals, size_t idx, typename ClusterNormalsToPlanesPCL<PointT>::Plane &plane)
+ClusterNormalsToPlanesPCL<PointT>::smoothClustering(const typename pcl::PointCloud<PointT>::ConstPtr &cloud, const pcl::PointCloud<pcl::Normal> &normals, size_t idx, typename ClusterNormalsToPlanesPCL<PointT>::Plane &plane)
 {
   plane.clear();
 
@@ -251,7 +252,7 @@ ClusterNormalsToPlanesPCL<PointT>::smoothClustering(const typename pcl::PointClo
  */
 template<typename PointT>
 void
-ClusterNormalsToPlanesPCL<PointT>::doClustering(const typename pcl::PointCloud<PointT>::Ptr &cloud, const pcl::PointCloud<pcl::Normal> &normals, std::vector<typename ClusterNormalsToPlanesPCL<PointT>::Plane::Ptr> &planes)
+ClusterNormalsToPlanesPCL<PointT>::doClustering(const typename pcl::PointCloud<PointT>::ConstPtr &cloud, const pcl::PointCloud<pcl::Normal> &normals, std::vector<typename ClusterNormalsToPlanesPCL<PointT>::Plane::Ptr> &planes)
 {
   mask_.clear();
   queue_.clear();
@@ -327,7 +328,7 @@ ClusterNormalsToPlanesPCL<PointT>::doClustering(const typename pcl::PointCloud<P
  */
 template<typename PointT>
 void
-ClusterNormalsToPlanesPCL<PointT>::compute(const typename pcl::PointCloud<PointT>::Ptr &_cloud, const pcl::PointCloud<pcl::Normal> &_normals, std::vector<PlaneModel<PointT> > &_planes)
+ClusterNormalsToPlanesPCL<PointT>::compute(const typename pcl::PointCloud<PointT>::ConstPtr &_cloud, const pcl::PointCloud<pcl::Normal> &_normals, std::vector<PlaneModel<PointT> > &_planes)
 {
   std::vector<typename ClusterNormalsToPlanesPCL<PointT>::Plane::Ptr> planes;
 
@@ -358,16 +359,10 @@ ClusterNormalsToPlanesPCL<PointT>::compute(const typename pcl::PointCloud<PointT
       for (size_t i=0; i<planes.size(); i++) {
           if( !planes[i]->is_plane )
               continue;
-          pm.inliers_.indices = planes[i]->indices;
+          pm.inliers_ = planes[i]->indices;
           float curvature;
-          Eigen::Vector4f model_coeff;
-          pcl::computePointNormal<PointT>(*pm.cloud_, pm.inliers_.indices, model_coeff, curvature);
+          pcl::computePointNormal<PointT>(*pm.cloud_, pm.inliers_, pm.coefficients_, curvature);
 //          model_coeff.normalize();
-          pm.coefficients_.values.resize(4);
-          pm.coefficients_.values[0] = model_coeff [0];
-          pm.coefficients_.values[1] = model_coeff [1];
-          pm.coefficients_.values[2] = model_coeff [2];
-          pm.coefficients_.values[3] = model_coeff [3];
           _planes.push_back( pm );
       }
   }
@@ -383,12 +378,12 @@ ClusterNormalsToPlanesPCL<PointT>::compute(const typename pcl::PointCloud<PointT
  */
 template<typename PointT>
 void
-ClusterNormalsToPlanesPCL<PointT>::compute(const typename pcl::PointCloud<PointT>::Ptr &cloud, const pcl::PointCloud<pcl::Normal> &normals, int x, int y, PlaneModel<PointT> &pm)
+ClusterNormalsToPlanesPCL<PointT>::compute(const typename pcl::PointCloud<PointT>::ConstPtr &cloud, const pcl::PointCloud<pcl::Normal> &normals, int x, int y, PlaneModel<PointT> &pm)
 {
   mask_.clear();
   mask_.resize(cloud->height*cloud->width,true);
 
-  for (int i = 0; i < cloud->height*cloud->width; i++)
+  for (size_t i = 0; i < cloud->height*cloud->width; i++)
   {
     if(!pcl::isFinite(cloud->points[i]))
       mask_[i] = false;
@@ -405,16 +400,10 @@ ClusterNormalsToPlanesPCL<PointT>::compute(const typename pcl::PointCloud<PointT
           clusterNormalsUnorganized(cloud, normals, idx, plane);
 
       pm.cloud_ = cloud;
-      pm.inliers_.indices = plane.indices;
+      pm.inliers_ = plane.indices;
 
         float curvature;
-        Eigen::Vector4f model_coeff;
-        pcl::computePointNormal<PointT>(*pm.cloud_, pm.inliers_.indices, model_coeff, curvature);
-        pm.coefficients_.values.resize(4);
-        pm.coefficients_.values[0] = model_coeff [0];
-        pm.coefficients_.values[1] = model_coeff [1];
-        pm.coefficients_.values[2] = model_coeff [2];
-        pm.coefficients_.values[3] = model_coeff [3];
+        pcl::computePointNormal<PointT>(*pm.cloud_, pm.inliers_, pm.coefficients_, curvature);
   }
 }
 

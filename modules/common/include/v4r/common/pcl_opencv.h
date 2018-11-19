@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (c) 2013 Aitor Aldoma, Thomas Faeulhammer
+ * Copyright (c) 2016 Thomas Faeulhammer
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -21,396 +21,172 @@
  *
  ******************************************************************************/
 
-
-#include <pcl/common/common.h>
+#include <boost/dynamic_bitset.hpp>
 #include <opencv2/opencv.hpp>
+#include <pcl/common/common.h>
 #include <v4r/core/macros.h>
+#include <v4r/common/camera.h>
 
-#ifndef V4R_PCL_OPENCV_H_
-#define V4R_PCL_OPENCV_H_
+#pragma once
 
 namespace v4r
 {
-  template<typename PointT>
-  V4R_EXPORTS
-  inline cv::Mat
-  ConvertPCLCloud2Image (const typename pcl::PointCloud<PointT> &pcl_cloud, bool crop = false)
-  {
-    unsigned pcWidth = pcl_cloud.width;
-    unsigned pcHeight = pcl_cloud.height;
-    unsigned position = 0;
 
-    unsigned min_u = pcWidth-1, min_v = pcHeight-1, max_u = 0, max_v = 0;
+///
+/// \brief The PCLOpenCVConverter class converts PCL point clouds into RGB, depth or occupancy images.
+/// \author Thomas Faeulhammer
+/// \date August 2016
+///
+template<typename PointT>
+class V4R_EXPORTS PCLOpenCVConverter
+{
+private:
+    typedef std::vector<uchar> (PCLOpenCVConverter<PointT>::*pf)(int v, int u) const;
 
-    cv::Mat_<cv::Vec3b> image (pcHeight, pcWidth);
+    typename pcl::PointCloud<PointT>::ConstPtr cloud_;   ///< cloud to be converted
+    std::vector<int> indices_; ///< pixel indices to be extracted (if empty, all pixel will be extracted)
+    Camera::ConstPtr cam_; ///< camera parameters (used for re-projection if point cloud is not organized)
+    bool remove_background_;  ///< if true, will set pixel not specified by the indices to the background color defined by its member variable background_color_
+    cv::Vec3b background_color_; ///< background color (only used if indices are not empty and remove_background is set to true)
+    float min_depth_m_;   ///< minimum depth in meter for normalization
+    float max_depth_m_;   ///< maximum depth in meter for normalization
+    cv::Rect roi_;  ///< region of interest with all given indices taken into account
+    cv::Mat output_matrix_; /// <
+    Eigen::MatrixXi index_map_; ///< index map showing which point of the unorganized(!) point cloud maps to which pixel in the image plane (pixel not occupied by any point have value -1)
 
-    for (unsigned row = 0; row < pcHeight; row++)
+    cv::Rect computeROIfromIndices();
+    void computeOrganizedCloud();
+
+    std::vector<uchar> getRGB(int v, int u)
     {
-      for (unsigned col = 0; col < pcWidth; col++)
-      {
-        cv::Vec3b & cvp = image.at<cv::Vec3b> (row, col);
-        position = row * pcWidth + col;
-        const PointT &pt = pcl_cloud.points[position];
-
-        cvp[0] = pt.b;
-        cvp[1] = pt.g;
-        cvp[2] = pt.r;
-
-        if( pcl::isFinite(pt) )
-        {
-            if( row < min_v )
-                min_v = row;
-            if( row > max_v )
-                max_v = row;
-            if( col < min_u )
-                min_u = col;
-            if( col > max_u )
-                max_u = col;
-        }
-      }
+        const PointT &pt = cloud_->at(u,v);
+        std::vector<uchar> rgb = {pt.b, pt.g, pt.r};
+        return rgb;
     }
 
-    if(crop) {
-        cv::Mat cropped_image = image(cv::Rect(min_u, min_v, max_u - min_u, max_v - min_v));
-        image = cropped_image.clone();
-    }
-
-    return image;
-  }
-
-
-
-  /**
-   *@brief converts a point cloud to an image and crops it to a fixed size
-   * @param[in] cloud
-   * @param[in] cluster_idx object indices
-   * @param[in] desired output height of the image
-   * @param[in] desired output width of the image
-   */
-  template<typename PointT>
-  V4R_EXPORTS
-  inline cv::Mat
-  ConvertPCLCloud2Image(const typename pcl::PointCloud<PointT> &cloud, const std::vector<int> &cluster_idx, size_t out_height, size_t out_width)
+    std::vector<uchar> getZNormalized(int v, int u)
     {
-        volatile int min_u, min_v, max_u, max_v;
-        max_u = max_v = 0;
-        min_u = cloud.width;
-        min_v = cloud.height;
-
-        for(size_t idx=0; idx<cluster_idx.size(); idx++) {
-            int u = cluster_idx[idx] % cloud.width;
-            int v = (int) (cluster_idx[idx] / cloud.width);
-
-            if (u>max_u)
-                max_u = u;
-
-            if (v>max_v)
-                max_v = v;
-
-            if (u<min_u)
-                min_u = u;
-
-            if (v<min_v)
-                min_v = v;
-        }
-
-        if ( (int)out_width > (max_u-min_u) ) {
-            int margin_x = out_width - (max_u - min_u);
-
-            volatile int margin_x_left = margin_x / 2.f;
-            min_u = std::max (0, min_u - margin_x_left);
-            volatile int margin_x_right = out_width - (max_u - min_u);
-            max_u = std::min ((int)cloud.width, max_u + margin_x_right);
-            margin_x_left = out_width - (max_u - min_u);
-            min_u = std::max (0, min_u - margin_x_left);
-        }
-
-        if ( (int)out_height > (max_v - min_v) ) {
-            int margin_y = out_height - (max_v - min_v);
-            volatile int margin_y_left = margin_y / 2.f;
-            min_v = std::max (0, min_v - margin_y_left);
-            volatile int margin_y_right = out_height - (max_v - min_v);
-            max_v = std::min ((int)cloud.height, max_v + margin_y_right);
-            margin_y_left = out_height - (max_v - min_v);
-            min_v = std::max (0, min_v - margin_y_left);
-        }
-
-        cv::Mat_<cv::Vec3b> image(max_v - min_v, max_u - min_u);
-
-        for (int row = 0; row < image.rows; row++) {
-          for (int col = 0; col < image.cols; col++) {
-            cv::Vec3b & cvp = image.at<cv::Vec3b> (row, col);
-            int position = (row + min_v) * cloud.width + (col + min_u);
-            const PointT &pt = cloud.points[position];
-
-            cvp[0] = pt.b;
-            cvp[1] = pt.g;
-            cvp[2] = pt.r;
-          }
-        }
-
-        cv::Mat_<cv::Vec3b> dst(out_height, out_width);
-        cv::resize(image, dst, dst.size(), 0, 0, cv::INTER_CUBIC);
-
-        return dst;
+        const PointT &pt = cloud_->at(u,v);
+        std::vector<uchar> rgb = {std::min<uchar>(255, std::max<uchar>(0, 255.f*(pt.z-min_depth_m_)/(max_depth_m_-min_depth_m_)) )};
+        return rgb;
     }
 
-
-  template<class PointT>
-  V4R_EXPORTS
-  inline cv::Mat
-  ConvertPCLCloud2DepthImage (const typename pcl::PointCloud<PointT> &pcl_cloud)
-  {
-    unsigned pcWidth = pcl_cloud.width;
-    unsigned pcHeight = pcl_cloud.height;
-    unsigned position = 0;
-
-    cv::Mat_<float> image(pcHeight, pcWidth);
-
-    for (unsigned row = 0; row < pcHeight; row++)
+    std::vector<float> getZ(int v, int u)
     {
-      for (unsigned col = 0; col < pcWidth; col++)
-      {
-        //cv::Vec3b & cvp = image.at<cv::Vec3b> (row, col);
-        position = row * pcWidth + col;
-        const PointT &pt = pcl_cloud.points[position];
-        image.at<float>(row,col) = 1.f / pt.z;
-      }
+        const PointT &pt = cloud_->at(u,v);
+        float depth;
+        pcl_isfinite(pt.z) ? depth=pt.z : depth=0.f;
+        std::vector<float> z = {depth};
+        return z;
     }
-    return image;
-  }
 
+    std::vector<uchar> getOccupied(int v, int u)
+    {
+        const PointT &pt = cloud_->at(u,v);
+        if (std::isfinite(pt.z) )
+            return std::vector<uchar>(1, 255);
+        else
+            return std::vector<uchar>(1, 0);
+    }
 
+public:
+    PCLOpenCVConverter(const typename pcl::PointCloud<PointT>::ConstPtr cloud = nullptr) :
+        cloud_(cloud), remove_background_ ( true ), background_color_ ( cv::Vec3b(255,255,255) ), min_depth_m_ (0.f), max_depth_m_ (5.f)
+    { }
 
+    ///
+    /// \brief setInputCloud
+    /// \param cloud point cloud to be converted
+    ///
+    void setInputCloud (const typename pcl::PointCloud<PointT>::ConstPtr cloud)
+    {
+        cloud_ = cloud;
+        index_map_.resize(0,0);
+    }
 
-  template<class PointT>
-  V4R_EXPORTS
-  inline cv::Mat
-  ConvertUnorganizedPCLCloud2Image (const typename pcl::PointCloud<PointT> &pcl_cloud,
-                                    bool crop = false,
-                                    float bg_r = 255.0f,
-                                    float bg_g = 255.0f,
-                                    float bg_b = 255.0f,
-                                    int width = 640,
-                                    int height = 480,
-                                    float f = 525.5f,
-                                    float cx = 319.5f,
-                                    float cy = 239.5f)
-  {
-      //transform scene_cloud to organized point cloud and then to image
-      pcl::PointCloud<PointT> organized_cloud;
-      organized_cloud.width = width;
-      organized_cloud.height = height;
-      organized_cloud.is_dense = true;
-      organized_cloud.points.resize(width*height);
+    ///
+    /// \brief setIndices
+    /// \param indices indices to be extracted (if empty, all pixel will be extracted)
+    ///
+    void setIndices (const std::vector<int> &indices)
+    {
+        indices_ = indices;
+    }
 
-      for(size_t kk=0; kk < organized_cloud.points.size(); kk++)
-      {
-          organized_cloud.points[kk].x = organized_cloud.points[kk].y = organized_cloud.points[kk].z =
-                  std::numeric_limits<float>::quiet_NaN();
+    ///
+    /// \brief setCamera
+    /// \param cam camera parameters (used for re-projection if point cloud is not organized)
+    ///
+    void setCamera (const Camera::ConstPtr cam)
+    {
+        cam_ = cam;
+    }
 
-          organized_cloud.points[kk].r = bg_r;
-          organized_cloud.points[kk].g = bg_g;
-          organized_cloud.points[kk].b = bg_b;
-      }
+    ///
+    /// \brief setRemoveBackground
+    /// \param remove_background if true, will set pixel not specified by the indices to the background color defined by its member variable background_color_
+    ///
+    void setRemoveBackground(bool remove_background = true)
+    {
+        remove_background_ = remove_background;
+    }
 
-      int ws2 = 1;
-      for (size_t kk = 0; kk < pcl_cloud.points.size (); kk++)
-      {
-          float x = pcl_cloud.points[kk].x;
-          float y = pcl_cloud.points[kk].y;
-          float z = pcl_cloud.points[kk].z;
-          int u = static_cast<int> (f * x / z + cx);
-          int v = static_cast<int> (f * y / z + cy);
+    ///
+    /// \brief setBackgroundColor
+    /// \param background color (only used if indices are not empty and remove_background is set to true)
+    ///
+    void setBackgroundColor (uchar r, uchar g, uchar b)
+    {
+        background_color_ = cv::Vec3b(r,g,b);
+    }
 
-          for(int uu = (u-ws2); uu < (u+ws2); uu++)
-          {
-              for(int vv = (v-ws2); vv < (v+ws2); vv++)
-              {
-                  //Not out of bounds
-                  if ((uu >= width) || (vv >= height) || (uu < 0) || (vv < 0))
-                      continue;
+    ///
+    /// \brief setMinMaxDepth (used for extracting normalized depth values)
+    /// \param min_depth in meter
+    /// \param max_depth in meter
+    ///
+    void setMinMaxDepth (float min_depth_m, float max_depth_m)
+    {
+        min_depth_m_ = min_depth_m;
+        max_depth_m_ = max_depth_m;
+    }
 
-                  float z_oc = organized_cloud.at (uu, vv).z;
+    cv::Mat extractDepth(); /// extracts depth image from pointcloud whereby depth values correspond to distance in meter
+    cv::Mat getNormalizedDepth();  /// extracts depth image from pointcloud whereby depth values in meter are normalized uniformly from 0 (<=min_depth_m_) to 255 (>=max_depth_m_)
+    cv::Mat getRGBImage();  /// returns the RGB image of the point cloud
+    cv::Mat getOccupiedPixel(); /// computes a binary iamge from a point cloud which elements indicate if the corresponding pixel (sorted in row-major order) is hit by a finite point in the point cloud.
 
-                  if(pcl_isnan(z_oc))
-                  {
-                      organized_cloud.at (uu, vv) = pcl_cloud.points[kk];
-                  }
-                  else
-                  {
-                      if(z < z_oc)
-                      {
-                          organized_cloud.at (uu, vv) = pcl_cloud.points[kk];
-                      }
-                  }
-              }
-          }
-      }
-      return ConvertPCLCloud2Image (organized_cloud, crop);
-  }  
-
-   /**
-     * @brief computes the depth map of a point cloud with fixed size output
-     * @param RGB-D cloud
-     * @param indices of the points belonging to the object
-     * @param out_height
-     * @param out_width
-     * @return depth image (float)
+    /**
+     * @brief getROI
+     * @return region of interest (bounding box defined by the given indices). If no indices are given, ROI will be whole image.
      */
-    template<typename PointT>
-    V4R_EXPORTS
-    inline cv::Mat
-    ConvertPCLCloud2DepthImageFixedSize(const pcl::PointCloud<PointT> &cloud, const std::vector<int> &cluster_idx, size_t out_height, size_t out_width)
+    cv::Rect
+    getROI() const
     {
-        volatile int min_u, min_v, max_u, max_v;
-        max_u = max_v = 0;
-        min_u = cloud.width;
-        min_v = cloud.height;
-
-    //    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_tmp(new pcl::PointCloud<pcl::PointXYZRGB>);
-    //    pcl::copyPointCloud(cloud,cluster_idx,*cluster_tmp);
-    //    pcl::visualization::PCLVisualizer vis("vis");
-    //    vis.addPointCloud(cluster_tmp,"cloud");
-    //    vis.spin();
-
-        for(size_t idx=0; idx<cluster_idx.size(); idx++) {
-            int u = cluster_idx[idx] % cloud.width;
-            int v = (int) (cluster_idx[idx] / cloud.width);
-
-            if (u>max_u)
-                max_u = u;
-
-            if (v>max_v)
-                max_v = v;
-
-            if (u<min_u)
-                min_u = u;
-
-            if (v<min_v)
-                min_v = v;
-        }
-
-        if ( (int)out_width > (max_u-min_u) ) {
-            int margin_x = out_width - (max_u - min_u);
-
-            volatile int margin_x_left = margin_x / 2.f;
-            min_u = std::max (0, min_u - margin_x_left);
-            volatile int margin_x_right = out_width - (max_u - min_u);
-            max_u = std::min ((int)cloud.width, max_u + margin_x_right);
-            margin_x_left = out_width - (max_u - min_u);
-            min_u = std::max (0, min_u - margin_x_left);
-        }
-
-        if ( (int)out_height > (max_v - min_v) ) {
-            int margin_y = out_height - (max_v - min_v);
-            volatile int margin_y_left = margin_y / 2.f;
-            min_v = std::max (0, min_v - margin_y_left);
-            volatile int margin_y_right = out_height - (max_v - min_v);
-            max_v = std::min ((int)cloud.height, max_v + margin_y_right);
-            margin_y_left = out_height - (max_v - min_v);
-            min_v = std::max (0, min_v - margin_y_left);
-        }
-
-        cv::Mat_<float> image(max_v - min_v, max_u - min_u);
-
-        for (int row = 0; row < image.rows; row++) {
-          for (int col = 0; col < image.cols; col++) {
-            float & cvp = image.at<float> (row, col);
-            int position = (row + min_v) * cloud.width + (col + min_u);
-            const PointT &pt = cloud.points[position];
-
-            cvp = 1.f / pt.z;
-          }
-        }
-
-        cv::Mat_<float> dst(out_height, out_width);
-        cv::resize(image, dst, dst.size(), 0, 0, cv::INTER_CUBIC);
-
-        return dst;
+        return roi_;
     }
-
 
 
     /**
+     * @brief getIndexMap
+     * @return returns the map of indices, i.e. which pixel represents which point of the unorganized(!) point cloud.
+     */
+    Eigen::MatrixXi
+    getIndexMap() const
+    {
+        return index_map_;
+    }
+
+    template<typename MatType=uchar> cv::Mat fillMatrix( std::vector<MatType> (PCLOpenCVConverter<PointT>::*pf)(int v, int u) );
+};
+
+    /**
       * @brief computes the depth map of a point cloud with fixed size output
-      * @param RGB-D cloud
-      * @param indices of the points belonging to the object
-      * @param out_height
-      * @param out_width
-      * @return depth image (unsigned int)
+      * @param indices of the points belonging to the object (assumes row major indices)
+      * @param width of the image/point cloud
+      * @param height of the image/point cloud
       */
-     template<typename PointT>
-     V4R_EXPORTS
-     inline cv::Mat
-     ConvertPCLCloud2UnsignedDepthImageFixedSize(const pcl::PointCloud<PointT> &cloud, const std::vector<int> &cluster_idx, size_t out_height, size_t out_width)
-     {
-         volatile int min_u, min_v, max_u, max_v;
-         max_u = max_v = 0;
-         min_u = cloud.width;
-         min_v = cloud.height;
-
-     //    pcl::PointCloud<pcl::PointXYZRGB>::Ptr cluster_tmp(new pcl::PointCloud<pcl::PointXYZRGB>);
-     //    pcl::copyPointCloud(cloud,cluster_idx,*cluster_tmp);
-     //    pcl::visualization::PCLVisualizer vis("vis");
-     //    vis.addPointCloud(cluster_tmp,"cloud");
-     //    vis.spin();
-
-         for(size_t idx=0; idx<cluster_idx.size(); idx++) {
-             int u = cluster_idx[idx] % cloud.width;
-             int v = (int) (cluster_idx[idx] / cloud.width);
-
-             if (u>max_u)
-                 max_u = u;
-
-             if (v>max_v)
-                 max_v = v;
-
-             if (u<min_u)
-                 min_u = u;
-
-             if (v<min_v)
-                 min_v = v;
-         }
-
-         if ( (int)out_width > (max_u-min_u) ) {
-             int margin_x = out_width - (max_u - min_u);
-
-             volatile int margin_x_left = margin_x / 2.f;
-             min_u = std::max (0, min_u - margin_x_left);
-             volatile int margin_x_right = out_width - (max_u - min_u);
-             max_u = std::min ((int)cloud.width, max_u + margin_x_right);
-             margin_x_left = out_width - (max_u - min_u);
-             min_u = std::max (0, min_u - margin_x_left);
-         }
-
-         if ( (int)out_height > (max_v - min_v) ) {
-             int margin_y = out_height - (max_v - min_v);
-             volatile int margin_y_left = margin_y / 2.f;
-             min_v = std::max (0, min_v - margin_y_left);
-             volatile int margin_y_right = out_height - (max_v - min_v);
-             max_v = std::min ((int)cloud.height, max_v + margin_y_right);
-             margin_y_left = out_height - (max_v - min_v);
-             min_v = std::max (0, min_v - margin_y_left);
-         }
-
-         cv::Mat_<unsigned int> image(max_v - min_v, max_u - min_u);
-
-         for (int row = 0; row < image.rows; row++) {
-           for (int col = 0; col < image.cols; col++) {
-             unsigned int & cvp = image.at<unsigned int> (row, col);
-             int position = (row + min_v) * cloud.width + (col + min_u);
-             const PointT &pt = cloud.points[position];
-
-             cvp = size_t(pt.z * 1000.f);
-           }
-         }
-
-         cv::Mat_<unsigned int> dst(out_height, out_width);
-         cv::resize(image, dst, dst.size(), 0, 0, cv::INTER_CUBIC);
-
-         return dst;
-     }
+    V4R_EXPORTS
+    cv::Rect
+    computeBoundingBox (const std::vector<int> &indices, size_t width, size_t height);
 }
-
-#endif /* PCL_OPENCV_H_ */

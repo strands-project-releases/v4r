@@ -31,63 +31,26 @@
 #ifndef V4R_COMMON_MISCELLANEOUS_H_
 #define V4R_COMMON_MISCELLANEOUS_H_
 
+#include <boost/dynamic_bitset.hpp>
 #include <pcl/common/common.h>
 #include <pcl/kdtree/flann.h>
 #include <pcl/octree/octree.h>
 #include <pcl/octree/octree_pointcloud_pointvector.h>
 #include <pcl/octree/impl/octree_iterator.hpp>
 #include <v4r/core/macros.h>
+#include <omp.h>
 
 namespace v4r
 {
 
-V4R_EXPORTS inline void transformNormals(const pcl::PointCloud<pcl::Normal> & normals_cloud,
+V4R_EXPORTS void transformNormals(const pcl::PointCloud<pcl::Normal> & normals_cloud,
                              pcl::PointCloud<pcl::Normal> & normals_aligned,
-                             const Eigen::Matrix4f & transform)
-{
-    normals_aligned.points.resize (normals_cloud.points.size ());
-    normals_aligned.width = normals_cloud.width;
-    normals_aligned.height = normals_cloud.height;
-    for (size_t k = 0; k < normals_cloud.points.size (); k++)
-    {
-        Eigen::Vector3f nt (normals_cloud.points[k].normal_x, normals_cloud.points[k].normal_y, normals_cloud.points[k].normal_z);
-        normals_aligned.points[k].normal_x = static_cast<float> (transform (0, 0) * nt[0] + transform (0, 1) * nt[1]
-                + transform (0, 2) * nt[2]);
-        normals_aligned.points[k].normal_y = static_cast<float> (transform (1, 0) * nt[0] + transform (1, 1) * nt[1]
-                + transform (1, 2) * nt[2]);
-        normals_aligned.points[k].normal_z = static_cast<float> (transform (2, 0) * nt[0] + transform (2, 1) * nt[1]
-                + transform (2, 2) * nt[2]);
+                             const Eigen::Matrix4f & transform);
 
-        normals_aligned.points[k].curvature = normals_cloud.points[k].curvature;
-
-    }
-}
-
-V4R_EXPORTS inline void transformNormals(const pcl::PointCloud<pcl::Normal> & normals_cloud,
+V4R_EXPORTS void transformNormals(const pcl::PointCloud<pcl::Normal> & normals_cloud,
                              pcl::PointCloud<pcl::Normal> & normals_aligned,
                              const std::vector<int> & indices,
-                             const Eigen::Matrix4f & transform)
-{
-    normals_aligned.points.resize (indices.size ());
-    normals_aligned.width = indices.size();
-    normals_aligned.height = 1;
-    for (size_t k = 0; k < indices.size(); k++)
-    {
-        Eigen::Vector3f nt (normals_cloud.points[indices[k]].normal_x,
-                normals_cloud.points[indices[k]].normal_y,
-                normals_cloud.points[indices[k]].normal_z);
-
-        normals_aligned.points[k].normal_x = static_cast<float> (transform (0, 0) * nt[0] + transform (0, 1) * nt[1]
-                + transform (0, 2) * nt[2]);
-        normals_aligned.points[k].normal_y = static_cast<float> (transform (1, 0) * nt[0] + transform (1, 1) * nt[1]
-                + transform (1, 2) * nt[2]);
-        normals_aligned.points[k].normal_z = static_cast<float> (transform (2, 0) * nt[0] + transform (2, 1) * nt[1]
-                + transform (2, 2) * nt[2]);
-
-        normals_aligned.points[k].curvature = normals_cloud.points[indices[k]].curvature;
-
-    }
-}
+                             const Eigen::Matrix4f & transform);
 
 V4R_EXPORTS inline void transformNormal(const Eigen::Vector3f & nt,
                             Eigen::Vector3f & normal_out,
@@ -109,7 +72,7 @@ V4R_EXPORTS inline Eigen::Matrix4f
 RotTrans2Mat4f(const Eigen::Quaternionf &q, const Eigen::Vector4f &trans)
 {
     Eigen::Matrix4f tf = Eigen::Matrix4f::Identity();;
-    tf.block<3,3>(0,0) = q.toRotationMatrix();
+    tf.block<3,3>(0,0) = q.normalized().toRotationMatrix();
     tf.block<4,1>(0,3) = trans;
     tf(3,3) = 1.f;
     return tf;
@@ -127,7 +90,7 @@ V4R_EXPORTS inline Eigen::Matrix4f
 RotTrans2Mat4f(const Eigen::Quaternionf &q, const Eigen::Vector3f &trans)
 {
     Eigen::Matrix4f tf = Eigen::Matrix4f::Identity();
-    tf.block<3,3>(0,0) = q.toRotationMatrix();
+    tf.block<3,3>(0,0) = q.normalized().toRotationMatrix();
     tf.block<3,1>(0,3) = trans;
     return tf;
 }
@@ -146,55 +109,10 @@ V4R_EXPORTS Mat4f2RotTrans(const Eigen::Matrix4f &tf, Eigen::Quaternionf &q, Eig
     trans = tf.block<4,1>(0,3);
 }
 
-V4R_EXPORTS inline void voxelGridWithOctree(pcl::PointCloud<pcl::PointXYZRGB>::Ptr & cloud,
+V4R_EXPORTS
+void voxelGridWithOctree(pcl::PointCloud<pcl::PointXYZRGB>::Ptr & cloud,
                                 pcl::PointCloud<pcl::PointXYZRGB> & voxel_grided,
-                                float resolution)
-{
-    pcl::octree::OctreePointCloudPointVector<pcl::PointXYZRGB> octree(resolution);
-    octree.setInputCloud(cloud);
-    octree.addPointsFromInputCloud();
-
-    pcl::octree::OctreePointCloudPointVector<pcl::PointXYZRGB>::LeafNodeIterator it2;
-    const pcl::octree::OctreePointCloudPointVector<pcl::PointXYZRGB>::LeafNodeIterator it2_end = octree.leaf_end();
-
-    int leaves = 0;
-    for (it2 = octree.leaf_begin(); it2 != it2_end; ++it2, leaves++)
-    {
-
-    }
-
-    voxel_grided.points.resize(leaves);
-    voxel_grided.width = leaves;
-    voxel_grided.height = 1;
-    voxel_grided.is_dense = true;
-
-    int kk=0;
-    for (it2 = octree.leaf_begin(); it2 != it2_end; ++it2, kk++)
-    {
-        pcl::octree::OctreeContainerPointIndices& container = it2.getLeafContainer();
-        std::vector<int> indexVector;
-        container.getPointIndices (indexVector);
-
-        int r,g,b;
-        r = g = b = 0;
-        pcl::PointXYZRGB p;
-        p.getVector3fMap() = Eigen::Vector3f::Zero();
-
-        for(size_t k=0; k < indexVector.size(); k++)
-        {
-            p.getVector3fMap() = p.getVector3fMap() +  cloud->points[indexVector[k]].getVector3fMap();
-            r += cloud->points[indexVector[k]].r;
-            g += cloud->points[indexVector[k]].g;
-            b += cloud->points[indexVector[k]].b;
-        }
-
-        p.getVector3fMap() = p.getVector3fMap() / static_cast<int>(indexVector.size());
-        p.r = r / static_cast<int>(indexVector.size());
-        p.g = g / static_cast<int>(indexVector.size());
-        p.b = b / static_cast<int>(indexVector.size());
-        voxel_grided.points[kk] = p;
-    }
-}
+                                float resolution);
 
 
 /**
@@ -205,32 +123,11 @@ V4R_EXPORTS inline void voxelGridWithOctree(pcl::PointCloud<pcl::PointXYZRGB>::P
  * @param resolution (optional)
  */
 template<typename PointInT>
-V4R_EXPORTS inline void
+V4R_EXPORTS void
 getIndicesFromCloud(const typename pcl::PointCloud<PointInT>::ConstPtr & full_input_cloud,
                     const typename pcl::PointCloud<PointInT>::ConstPtr & search_points,
                     std::vector<int> & indices,
-                    float resolution = 0.005f)
-{
-    pcl::octree::OctreePointCloudSearch<PointInT> octree (resolution);
-    octree.setInputCloud (full_input_cloud);
-    octree.addPointsFromInputCloud ();
-
-    std::vector<int> pointIdxNKNSearch;
-    std::vector<float> pointNKNSquaredDistance;
-
-    indices.resize( search_points->points.size() );
-    size_t kept=0;
-
-    for(size_t j=0; j < search_points->points.size(); j++)
-    {
-        if (octree.nearestKSearch (search_points->points[j], 1, pointIdxNKNSearch, pointNKNSquaredDistance) > 0)
-        {
-            indices[kept] = pointIdxNKNSearch[0];
-            kept++;
-        }
-    }
-    indices.resize(kept);
-}
+                    float resolution = 0.005f);
 
 /**
  * @brief returns point indices from a point cloud which are closest to search points
@@ -240,44 +137,18 @@ getIndicesFromCloud(const typename pcl::PointCloud<PointInT>::ConstPtr & full_in
  * @param resolution (optional)
  */
 template<typename PointT, typename Type>
-V4R_EXPORTS inline void
+V4R_EXPORTS void
 getIndicesFromCloud(const typename pcl::PointCloud<PointT>::ConstPtr & full_input_cloud,
                     const typename pcl::PointCloud<PointT> & search_pts,
                     typename std::vector<Type> & indices,
-                    float resolution = 0.005f)
-{
-    pcl::octree::OctreePointCloudSearch<PointT> octree (resolution);
-    octree.setInputCloud (full_input_cloud);
-    octree.addPointsFromInputCloud ();
+                    float resolution = 0.005f);
 
-    std::vector<int> pointIdxNKNSearch;
-    std::vector<float> pointNKNSquaredDistance;
+DEPRECATED(template<typename DistType>
+V4R_EXPORTS void convertToFLANN ( const std::vector<std::vector<float> > &data, boost::shared_ptr< typename flann::Index<DistType> > &flann_index));
 
-    indices.resize( search_pts.points.size() );
-    size_t kept=0;
-
-    for(size_t j=0; j < search_pts.points.size(); j++)
-    {
-        if (octree.nearestKSearch (search_pts.points[j], 1, pointIdxNKNSearch, pointNKNSquaredDistance) > 0)
-        {
-            indices[kept] = pointIdxNKNSearch[0];
-            kept++;
-        }
-    }
-    indices.resize(kept);
-}
-
-template<typename DistType>
-V4R_EXPORTS void convertToFLANN ( const std::vector<std::vector<float> > &data, boost::shared_ptr< typename flann::Index<DistType> > &flann_index);
-
-template<typename DistType>
+DEPRECATED(template<typename DistType>
 V4R_EXPORTS void nearestKSearch ( typename boost::shared_ptr< flann::Index<DistType> > &index, std::vector<float> descr, int k, flann::Matrix<int> &indices,
-                                                  flann::Matrix<float> &distances );
-
-/**
- * @brief sets the sensor origin and sensor orientation fields of the PCL pointcloud header by the given transform
- */
-template<typename PointType> V4R_EXPORTS void setCloudPose(const Eigen::Matrix4f &trans, typename pcl::PointCloud<PointType> &cloud);
+                                                  flann::Matrix<float> &distances ));
 
 V4R_EXPORTS inline std::vector<size_t>
 convertVecInt2VecSizet(const std::vector<int> &input)
@@ -339,25 +210,30 @@ convertPCLIndices2VecSizet(const pcl::PointIndices &input)
     return v_size_t;
 }
 
-V4R_EXPORTS inline std::vector<bool>
-createMaskFromIndices(const std::vector<size_t> &indices,size_t image_size)
+V4R_EXPORTS inline boost::dynamic_bitset<>
+createMaskFromIndices(const std::vector<size_t> &indices, size_t image_size)
 {
-    std::vector<bool> mask (image_size, false);
+    boost::dynamic_bitset<> mask (image_size, 0);
 
     for (size_t obj_pt_id = 0; obj_pt_id < indices.size(); obj_pt_id++)
-        mask [ indices[obj_pt_id] ] = true;
+        mask.set(indices[obj_pt_id]);
 
     return mask;
 }
 
-
-V4R_EXPORTS inline std::vector<bool>
+/**
+ * @brief createMaskFromIndices creates a boolean mask of all indices set
+ * @param indices
+ * @param image_size
+ * @return
+ */
+V4R_EXPORTS inline boost::dynamic_bitset<>
 createMaskFromIndices(const std::vector<int> &indices, size_t image_size)
 {
-    std::vector<bool> mask (image_size, false);
+    boost::dynamic_bitset<> mask (image_size, 0);
 
     for (size_t obj_pt_id = 0; obj_pt_id < indices.size(); obj_pt_id++)
-        mask [ indices[obj_pt_id] ] = true;
+        mask.set(indices[obj_pt_id]);
 
     return mask;
 }
@@ -365,10 +241,9 @@ createMaskFromIndices(const std::vector<int> &indices, size_t image_size)
 
 template<typename T>
 V4R_EXPORTS std::vector<T>
-createIndicesFromMask(const std::vector<bool> &mask, bool invert=false)
+createIndicesFromMask(const boost::dynamic_bitset<> &mask, bool invert=false)
 {
-    std::vector<T> out;
-    out.resize(mask.size());
+    std::vector<T> out (mask.size());
 
     size_t kept=0;
     for(size_t i=0; i<mask.size(); i++)
@@ -384,35 +259,23 @@ createIndicesFromMask(const std::vector<bool> &mask, bool invert=false)
 }
 
 /**
+ * @brief computeMaskFromImageMap
+ * @param image_map map indicating which pixel belong to which point of the point cloud.
+ * @param nr_points number of points
+ * @return bitmask indicating which points are represented in the image map
+ */
+V4R_EXPORTS boost::dynamic_bitset<>
+computeMaskFromIndexMap( const Eigen::MatrixXi &image_map, size_t nr_points );
+
+/**
   * @brief: Increments a boolean vector by 1 (LSB at the end)
   * @param v Input vector
   * @param inc_v Incremented output vector
   * @return overflow (true if overflow)
   */
-inline V4R_EXPORTS bool
-incrementVector(const std::vector<bool> &v, std::vector<bool> &inc_v)
-{
-    inc_v = v;
+V4R_EXPORTS bool
+incrementVector(const std::vector<bool> &v, std::vector<bool> &inc_v);
 
-    bool overflow=true;
-    for(size_t bit=0; bit<v.size(); bit++)
-    {
-        if(!v[bit])
-        {
-            overflow = false;
-            break;
-        }
-    }
-
-    bool carry = v.back();
-    inc_v.back() = !v.back();
-    for(int bit=v.size()-2; bit>=0; bit--)
-    {
-        inc_v[bit] = v[ bit ] != carry;
-        carry = v[ bit ] && carry;
-    }
-    return overflow;
-}
 
 /**
   * @brief: extracts elements from a vector indicated by some indices
@@ -424,47 +287,133 @@ template<typename T>
 inline V4R_EXPORTS typename std::vector<T>
 filterVector(const std::vector<T> &in, const std::vector<int> &indices)
 {
-    typename std::vector<T> out(in.size());
-    size_t kept=0;
+    std::vector<T> out;
+    out.reserve ( indices.size() );
     for(size_t i = 0; i < indices.size(); i++)
-        out[kept++] = in[ indices[i] ];
-
-    out.resize(kept);
+        out.push_back( in[ indices[i] ] );
     return out;
 }
-}
 
-
-namespace pcl
+/**
+ * @brief checks if value is in the range between min and max
+ * @param[in] value to check
+ * @param[in] min range
+ * @param[in] max range
+ * @return true if within range
+ */
+template<class T>
+bool is_in_range(T value, T min, T max)
 {
-/** \brief Extract the indices of a given point cloud as a new point cloud (instead of int types, this function uses a size_t vector)
-  * \param[in] cloud_in the input point cloud dataset
-  * \param[in] indices the vector of indices representing the points to be copied from \a cloud_in
-  * \param[out] cloud_out the resultant output point cloud dataset
-  * \note Assumes unique indices.
-  * \ingroup common
-  */
-template <typename PointT> V4R_EXPORTS void
-copyPointCloud (const pcl::PointCloud<PointT> &cloud_in,
-                const std::vector<size_t> &indices,
-                pcl::PointCloud<PointT> &cloud_out);
-
-/** \brief Extract the indices of a given point cloud as a new point cloud (instead of int types, this function uses a size_t vector)
-  * \param[in] cloud_in the input point cloud dataset
-  * \param[in] indices the vector of indices representing the points to be copied from \a cloud_in
-  * \param[out] cloud_out the resultant output point cloud dataset
-  * \note Assumes unique indices.
-  * \ingroup common
-  */
-template <typename PointT> V4R_EXPORTS void
-copyPointCloud (const pcl::PointCloud<PointT> &cloud_in,
-                const std::vector<size_t, Eigen::aligned_allocator<size_t> > &indices,
-                pcl::PointCloud<PointT> &cloud_out);
-
-template <typename PointT> V4R_EXPORTS void
-copyPointCloud (const pcl::PointCloud<PointT> &cloud_in,
-                     const std::vector<bool> &mask,
-                     pcl::PointCloud<PointT> &cloud_out);
+    return (value >= min) && (value <= max);
 }
+
+/**
+ * @brief sorts a vector and returns sorted indices
+ */
+template <typename T>
+std::vector<size_t> sort_indexes(const std::vector<T> &v) {
+
+  // initialize original index locations
+  std::vector<size_t> idx(v.size());
+  for (size_t i = 0; i != idx.size(); ++i) idx[i] = i;
+
+  // sort indexes based on comparing values in v
+  std::sort(idx.begin(), idx.end(),
+       [&v](size_t i1, size_t i2) {return v[i1] < v[i2];});
+
+  return idx;
+}
+
+/**
+ * @brief computePointCloudProperties computes centroid and elongations along principal compenents for a point cloud
+ * @param[in] cloud input cloud
+ * @param centroid computed centroid of cloud
+ * @param elongationsXYZ computes elongations along first, second and third principal component
+ * @param eigenBasis matrix that aligns point cloud with eigenvectors
+ * @param indices region of interest (if empty, whole point cloud will be processed)
+ */
+template<typename PointT>
+V4R_EXPORTS
+void
+computePointCloudProperties(const pcl::PointCloud<PointT> &cloud, Eigen::Vector4f &centroid, Eigen::Vector3f &elongationsXYZ,  Eigen::Matrix4f &eigenBasis, const std::vector<int> &indices = std::vector<int>());
+
+
+V4R_EXPORTS inline void
+removeRow(Eigen::MatrixXd& matrix, unsigned int rowToRemove)
+{
+    unsigned int numRows = matrix.rows()-1;
+    unsigned int numCols = matrix.cols();
+
+    if( rowToRemove < numRows )
+        matrix.block(rowToRemove,0,numRows-rowToRemove,numCols) = matrix.block(rowToRemove+1,0,numRows-rowToRemove,numCols);
+
+    matrix.conservativeResize(numRows,numCols);
+}
+
+V4R_EXPORTS inline void
+removeColumn(Eigen::MatrixXd& matrix, unsigned int colToRemove)
+{
+    unsigned int numRows = matrix.rows();
+    unsigned int numCols = matrix.cols()-1;
+
+    if( colToRemove < numCols )
+        matrix.block(0,colToRemove,numRows,numCols-colToRemove) = matrix.block(0,colToRemove+1,numRows,numCols-colToRemove);
+
+    matrix.conservativeResize(numRows,numCols);
+}
+
+V4R_EXPORTS inline void
+removeRow(Eigen::MatrixXf& matrix, int rowToRemove)
+{
+    int numRows = matrix.rows()-1;
+    int numCols = matrix.cols();
+
+    if( rowToRemove < numRows )
+        matrix.block(rowToRemove,0,numRows-rowToRemove,numCols) = matrix.block(rowToRemove+1,0,numRows-rowToRemove,numCols);
+
+    matrix.conservativeResize(numRows,numCols);
+}
+
+V4R_EXPORTS inline void
+removeColumn(Eigen::MatrixXf& matrix, int colToRemove)
+{
+    int numRows = matrix.rows();
+    int numCols = matrix.cols()-1;
+
+    if( colToRemove < numCols )
+        matrix.block(0,colToRemove,numRows,numCols-colToRemove) = matrix.block(0,colToRemove+1,numRows,numCols-colToRemove);
+
+    matrix.conservativeResize(numRows,numCols);
+}
+
+/**
+ * @brief runningAverage computes incrementally the average of a vector
+ * @param old_average
+ * @param old_size the number of contributing vectors before updating
+ * @param increment the new vector being added
+ * @return
+ */
+inline Eigen::VectorXf
+V4R_EXPORTS runningAverage (const Eigen::VectorXf &old_average, size_t old_size, const Eigen::VectorXf &increment) {    // update average point
+    double w = old_size / double(old_size + 1);
+    Eigen::VectorXf newAvg = old_average  * w + increment / double(old_size + 1);
+    return newAvg;
+}
+
+/**
+ * @brief computeRotationMatrixTwoAlignVectors Calculate Rotation Matrix to align Vector src to Vector target in 3d
+ * @param src
+ * @param target
+ * @return 3x3 rotation matrix
+ */
+Eigen::Matrix3f
+V4R_EXPORTS
+computeRotationMatrixToAlignVectors(const Eigen::Vector3f &src, const Eigen::Vector3f &target);
+
+template<typename PointT>
+V4R_EXPORTS float computeMeshResolution (const typename pcl::PointCloud<PointT>::ConstPtr & input);
+
+}
+
 
 #endif

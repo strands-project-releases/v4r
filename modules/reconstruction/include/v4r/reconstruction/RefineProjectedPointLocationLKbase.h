@@ -37,6 +37,7 @@
 #include <Eigen/Dense>
 #include <opencv2/core/core.hpp>
 #include <v4r/common/impl/SmartPtr.hpp>
+#include <v4r/core/macros.h>
 
 namespace v4r
 {
@@ -44,7 +45,7 @@ namespace v4r
 /**
  * RefineProjectedPointLocationLKbase
  */
-class RefineProjectedPointLocationLKbase
+class V4R_EXPORTS RefineProjectedPointLocationLKbase
 {
 public:
 
@@ -52,14 +53,14 @@ public:
   RefineProjectedPointLocationLKbase(){};
   virtual ~RefineProjectedPointLocationLKbase(){};
 
-  virtual void setSourceImage(const cv::Mat_<unsigned char> &_im_src, const Eigen::Matrix4f &_pose_src) {};
-  virtual void setTargetImage(const cv::Mat_<unsigned char> &_im_tgt, const Eigen::Matrix4f &_pose_tgt) {};
+  virtual void setSourceImage(const cv::Mat_<unsigned char> &_im_src, const Eigen::Matrix4f &_pose_src) { (void)_im_src; (void)_pose_src; };
+  virtual void setTargetImage(const cv::Mat_<unsigned char> &_im_tgt, const Eigen::Matrix4f &_pose_tgt) { (void)_im_tgt; (void)_pose_tgt; };
   virtual void refineImagePoints(const std::vector<Eigen::Vector3f> &pts, 
         const std::vector<Eigen::Vector3f> &normals, 
-        std::vector<cv::Point2f> &im_pts_tgt, std::vector<int> &converged) {};
+        std::vector<cv::Point2f> &im_pts_tgt, std::vector<int> &converged) { (void) pts; (void)normals; (void)im_pts_tgt; (void) converged; };
 
-  virtual void setSourceCameraParameter(const cv::Mat &_intrinsic, const cv::Mat &_dist_coeffs) {};
-  virtual void setTargetCameraParameter(const cv::Mat &_intrinsic, const cv::Mat &_dist_coeffs) {};
+  virtual void setSourceCameraParameter(const cv::Mat &_intrinsic, const cv::Mat &_dist_coeffs) { (void)_intrinsic; (void)_dist_coeffs; };
+  virtual void setTargetCameraParameter(const cv::Mat &_intrinsic, const cv::Mat &_dist_coeffs) { (void)_intrinsic; (void)_dist_coeffs; };
 
   typedef SmartPtr< ::v4r::RefineProjectedPointLocationLKbase> Ptr;
   typedef SmartPtr< ::v4r::RefineProjectedPointLocationLKbase const> ConstPtr;
