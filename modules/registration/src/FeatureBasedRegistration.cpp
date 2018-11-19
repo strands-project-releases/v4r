@@ -1,7 +1,7 @@
 #include <v4r_config.h>
 #include <v4r/registration/FeatureBasedRegistration.h>
 #include <v4r/common/miscellaneous.h>
-#include <v4r/common/impl/geometric_consistency.hpp>
+#include <pcl/recognition/impl/cg/geometric_consistency.hpp>
 #include <v4r/common/graph_geometric_consistency.h>
 #include <pcl/registration/correspondence_estimation.h>
 #include <pcl/registration/impl/correspondence_estimation.hpp>
@@ -16,11 +16,7 @@
 #include <pcl/octree/impl/octree_base.hpp>
 #include <v4r/common/miscellaneous.h>
 
-#ifdef HAVE_SIFTGPU
 #include <v4r/features/sift_local_estimator.h>
-#else
-#include <v4r/features/opencv_sift_local_estimator.h>
-#endif
 
 namespace v4r
 {
@@ -41,11 +37,7 @@ template<class PointT> void
 FeatureBasedRegistration<PointT>::initialize(std::vector<std::pair<int, int> > & session_ranges)
 {
 
-#ifdef HAVE_SIFTGPU
     typename v4r::SIFTLocalEstimation<PointT> estimator;
-#else
-    typename v4r::OpenCVSIFTLocalEstimation<PointT> estimator;
-#endif
 
     //computes features and keypoints for the views of all sessions using appropiate object indices
     size_t total_views = this->getTotalNumberOfClouds();
@@ -72,24 +64,24 @@ FeatureBasedRegistration<PointT>::initialize(std::vector<std::pair<int, int> > &
 
     for(size_t i=0; i < total_views; i++)
     {
-        typename pcl::PointCloud<PointT>::Ptr cloud = this->getCloud(i);
-        pcl::PointCloud<pcl::Normal>::Ptr normals = this->getNormal(i);
+        typename pcl::PointCloud<PointT>::ConstPtr cloud = this->getCloud(i);
+        pcl::PointCloud<pcl::Normal>::ConstPtr normals = this->getNormal(i);
         std::vector<int> & indices = this->getIndices(i);
         Eigen::Matrix4f pose = this->getPose(i);
 
-        typename pcl::PointCloud<PointT>::Ptr processed(new pcl::PointCloud<PointT>);
         sift_keypoints_[i].reset(new pcl::PointCloud<PointT>);
         sift_normals_[i].reset(new pcl::PointCloud< pcl::Normal >);
 
         std::vector<std::vector<float> > sift_descs;
-        typename pcl::PointCloud< PointT >::Ptr sift_keys(new pcl::PointCloud< PointT >);
-
+        estimator.setInputCloud(cloud);
         estimator.setIndices(indices);
-        //estimator.estimate(cloud, processed, sift_keypoints_[i], sift_features_[i]);
-        estimator.estimate(*cloud, *processed, *sift_keys, sift_descs);
+        estimator.compute(sift_descs);
+        typename pcl::PointCloud< PointT >::Ptr sift_keys (new pcl::PointCloud<PointT>);
+        std::vector<int> sift_kp_indices = estimator.getKeypointIndices();
+        pcl::copyPointCloud( *cloud, sift_kp_indices, *sift_keys);
 
         pcl::PointIndices original_indices;
-        estimator.getKeypointIndices(original_indices.indices);
+        original_indices.indices = estimator.getKeypointIndices();
 
         //check if there exist already a feature at sift_keys[k] position, add points to octree that were not found before
         std::vector<int> non_occupied;
@@ -232,32 +224,31 @@ FeatureBasedRegistration<PointT>::compute(int s1, int s2)
         bool graph_based = true;
         if(!graph_based)
         {
-            GeometricConsistencyGrouping<PointT, PointT> gc_clusterer;
+            pcl::GeometricConsistencyGrouping<PointT, PointT> gc_clusterer;
             gc_clusterer.setGCSize (inlier_threshold_);
             gc_clusterer.setGCThreshold (gc_threshold_);
-
             gc_clusterer.setInputCloud (kps_s2);
             gc_clusterer.setSceneCloud (kps_s1);
-            gc_clusterer.setModelSceneCorrespondences (*cor);
-
+            gc_clusterer.setModelSceneCorrespondences (cor);
             gc_clusterer.cluster (clustered_corrs);
         }
         else
         {
-            GraphGeometricConsistencyGrouping<PointT, PointT> gc_clusterer;
-            gc_clusterer.setGCSize (inlier_threshold_);
-            gc_clusterer.setGCThreshold (gc_threshold_);
-            gc_clusterer.setRansacThreshold(inlier_threshold_);
-            gc_clusterer.setDistForClusterFactor(1.f);
-            gc_clusterer.setDotDistance(0.25f);
-            gc_clusterer.setMaxTaken(2);
-            gc_clusterer.setMaxTimeForCliquesComputation(50);
-            gc_clusterer.setCheckNormalsOrientation(true);
+            GraphGeometricConsistencyGroupingParameter param;
+            param.gc_size_ = inlier_threshold_;
+            param.gc_threshold_ = gc_threshold_;
+            param.ransac_threshold_ = inlier_threshold_;
+            param.dist_for_cluster_factor_ = 1.f;
+            param.thres_dot_distance_ = 0.25f;
+            param.max_taken_correspondence_ = 2;
+            param.max_time_allowed_cliques_comptutation_ = 50;
+            param.check_normals_orientation_ = true;
 
+            GraphGeometricConsistencyGrouping<PointT, PointT> gc_clusterer (param);
             gc_clusterer.setInputCloud (kps_s2);
             gc_clusterer.setSceneCloud (kps_s1);
             gc_clusterer.setInputAndSceneNormals(normals_s2, normals_s1);
-            gc_clusterer.setModelSceneCorrespondences (*cor);
+            gc_clusterer.setModelSceneCorrespondences (cor);
             gc_clusterer.cluster (clustered_corrs);
         }
 

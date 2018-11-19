@@ -361,7 +361,7 @@ function(__v4r_resolve_dependencies)
     foreach(d ${V4R_MODULE_${m}_OPT_DEPS})
       if(NOT (";${deps_${m}};" MATCHES ";${d};"))
         string(TOUPPER "${d}" upper_d)
-        if(HAVE_${upper_d} OR TARGET ${d})
+        if(HAVE_${upper_d} OR HAVE_${d} OR TARGET ${d})
           list(APPEND deps_${m} ${d})
         endif()
       endif()
@@ -565,6 +565,7 @@ macro(v4r_glob_module_sources)
 
   file(GLOB_RECURSE lib_srcs
        "${CMAKE_CURRENT_LIST_DIR}/src/*.cpp"
+       "${CMAKE_CURRENT_LIST_DIR}/src/*.cc"
   )
   #file(GLOB_RECURSE lib_int_hdrs
        #"${CMAKE_CURRENT_LIST_DIR}/src/*.hpp"
@@ -573,10 +574,12 @@ macro(v4r_glob_module_sources)
   file(GLOB lib_hdrs
        #"${CMAKE_CURRENT_LIST_DIR}/include/v4r/*.hpp"
        "${CMAKE_CURRENT_LIST_DIR}/include/v4r/${name}/*.h"
+       "${CMAKE_CURRENT_LIST_DIR}/include/v4r/${name}/*.hh"
        "${CMAKE_CURRENT_LIST_DIR}/include/v4r/${name}/impl/*.hpp"
   )
   file(GLOB lib_hdrs_detail
        "${CMAKE_CURRENT_LIST_DIR}/include/v4r/${name}/detail/*.h"
+       "${CMAKE_CURRENT_LIST_DIR}/include/v4r/${name}/detail/*.hh"
        "${CMAKE_CURRENT_LIST_DIR}/include/v4r/${name}/detail/*.hpp"
   )
 
@@ -702,12 +705,15 @@ macro(_v4r_create_module)
     set_target_properties(${the_module} PROPERTIES DEFINE_SYMBOL V4RAPI_EXPORTS)
   endif()
 
-  v4r_install_target(${the_module} EXPORT V4RModules OPTIONAL
-    RUNTIME DESTINATION ${V4R_BIN_INSTALL_PATH} COMPONENT libs
-    LIBRARY DESTINATION ${V4R_LIB_INSTALL_PATH} COMPONENT libs NAMELINK_SKIP
-    ARCHIVE DESTINATION ${V4R_LIB_INSTALL_PATH} COMPONENT dev
-    )
   get_target_property(_target_type ${the_module} TYPE)
+  if(V4R_MODULE_${the_module}_CLASS STREQUAL "PUBLIC" AND
+     ("${_target_type}" STREQUAL "SHARED_LIBRARY" OR (NOT BUILD_SHARED_LIBS OR NOT INSTALL_CREATE_DISTRIB)))
+    v4r_install_target(${the_module} EXPORT V4RModules OPTIONAL
+      RUNTIME DESTINATION ${V4R_BIN_INSTALL_PATH} COMPONENT libs
+      LIBRARY DESTINATION ${V4R_LIB_INSTALL_PATH} COMPONENT libs NAMELINK_SKIP
+      ARCHIVE DESTINATION ${V4R_LIB_INSTALL_PATH} COMPONENT dev
+      )
+  endif()
   if("${_target_type}" STREQUAL "SHARED_LIBRARY")
     install(TARGETS ${the_module}
       LIBRARY DESTINATION ${V4R_LIB_INSTALL_PATH} COMPONENT dev NAMELINK_ONLY)
@@ -885,10 +891,6 @@ function(v4r_add_accuracy_tests)
 
     else(V4R_DEPENDENCIES_FOUND)
       # TODO: warn about unsatisfied dependencies
-    endif(V4R_DEPENDENCIES_FOUND)
-
-    if(INSTALL_TESTS)
-      install(TARGETS ${the_target} RUNTIME DESTINATION ${V4R_TEST_INSTALL_PATH} COMPONENT tests)
     endif()
   endif()
 endfunction()
