@@ -33,6 +33,7 @@
 #ifndef _BUNDLE_ADJUSTMENT_H
 #define _BUNDLE_ADJUSTMENT_H
 
+#ifndef Q_MOC_RUN
 #include <QThread>
 #include <QMutex>
 #include <queue>
@@ -47,6 +48,7 @@
 #include <v4r/common/impl/SmartPtr.hpp>
 #include <v4r/keypoints/impl/invPose.hpp>
 #include <v4r/reconstruction/ProjBundleAdjuster.h>
+#endif
 
 
 
@@ -70,7 +72,7 @@ public:
   bool isRunning();
 
   void optimizeCamStructProj(v4r::Object::Ptr &_model, boost::shared_ptr< std::vector<Sensor::CameraLocation> > &_cam_trajectory,
-                             boost::shared_ptr< std::vector<std::pair<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr> > > &_log_clouds,
+                             boost::shared_ptr< std::vector<std::pair<int, pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr> > > &_log_clouds,
                              boost::shared_ptr< Sensor::AlignedPointXYZRGBVector > &_oc_cloud);
   bool restoreCameras();
 
@@ -88,7 +90,7 @@ signals:
 private:
   void run();
   void optimizeCamStructProj();
-  void renewPrevCloud(const std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> > &poses, const std::vector<std::pair<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr> > &clouds);
+  void renewPrevCloud(const std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> > &poses, const std::vector<std::pair<int, pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr> > &clouds);
 
   Command cmd;
   bool m_run;
@@ -97,7 +99,7 @@ private:
 
   v4r::Object::Ptr model;
   boost::shared_ptr< std::vector<Sensor::CameraLocation> > cam_trajectory;
-  boost::shared_ptr< std::vector<std::pair<int, pcl::PointCloud<pcl::PointXYZRGB>::Ptr> > > log_clouds;
+  boost::shared_ptr< std::vector<std::pair<int, pcl::PointCloud<pcl::PointXYZRGB>::ConstPtr> > > log_clouds;
   boost::shared_ptr< Sensor::AlignedPointXYZRGBVector > oc_cloud;
 
   std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> > stored_cameras;

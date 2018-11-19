@@ -22,38 +22,45 @@
  ******************************************************************************/
 
 
-#ifndef V4R_GLOBAL_ESTIMATOR_H_
-#define V4R_GLOBAL_ESTIMATOR_H_
+#pragma once
 
 #include <v4r/core/macros.h>
 #include <v4r/common/faat_3d_rec_framework_defines.h>
-#include <v4r/common/normal_estimator.h>
+#include <v4r/features/types.h>
 
 namespace v4r
 {
     template <typename PointT>
     class V4R_EXPORTS GlobalEstimator {
       protected:
-        bool computed_normals_;
-        typedef typename pcl::PointCloud<PointT>::Ptr PointInTPtr;
-        typename boost::shared_ptr<PreProcessorAndNormalEstimator<PointT, pcl::Normal> > normal_estimator_;
-        pcl::PointCloud<pcl::Normal>::Ptr normals_;
-        PointInTPtr input_cloud_; /// @brief point cloud containing the object
-        std::vector<int> indices_; /// @brief indices of the point cloud belonging to the object
+        pcl::PointCloud<pcl::Normal>::ConstPtr normals_;
+        typename pcl::PointCloud<PointT>::ConstPtr cloud_; ///< point cloud containing the object
+        std::vector<int> indices_; ///< indices of the point cloud belonging to the object
+        std::string descr_name_;
+        size_t descr_type_;
+        size_t feature_dimensions_;
 
+        std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> > transforms_;   ///< transforms (e.g. from OUR-CVFH) aligning the input cloud with the descriptors's local referance frame
 
       public:
+        GlobalEstimator(const std::string &descr_name = "", size_t descr_type = 0, size_t feature_dimensions = 0)
+            : descr_name_ (descr_name),
+              descr_type_ (descr_type),
+              feature_dimensions_ (feature_dimensions)
+        { }
+
+        virtual ~GlobalEstimator() { }
 
         /**
          * @brief global feature description
          * @return signatures describing the point cloud
          */
-        virtual std::vector<float>
-        estimate ()=0;
+        virtual bool
+        compute(Eigen::MatrixXf &signature) = 0;
 
         /** @brief sets the normals of the point cloud belonging to the object (optional) */
         void
-        setNormals(const pcl::PointCloud<pcl::Normal>::Ptr & normals)
+        setNormals(const pcl::PointCloud<pcl::Normal>::ConstPtr & normals)
         {
           normals_ = normals;
         }
@@ -69,13 +76,40 @@ namespace v4r
 
         /** @brief sets the input cloud containing the object to be classified */
         void
-        setInput(const PointInTPtr & in)
+        setInputCloud(const typename pcl::PointCloud<PointT>::ConstPtr & in)
         {
-            input_cloud_ = in;
+            cloud_ = in;
         }
 
+        std::string
+        getFeatureDescriptorName() const
+        {
+            return descr_name_;
+        }
+
+        size_t
+        getFeatureType() const
+        {
+            return descr_type_;
+        }
+
+        size_t
+        getFeatureDimensions() const
+        {
+            return feature_dimensions_;
+        }
+
+        std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> >
+        getTransforms() const
+        {
+            return transforms_;
+        }
+
+        virtual bool
+        needNormals() const = 0;
+
+        typedef boost::shared_ptr< GlobalEstimator<PointT> > Ptr;
+        typedef boost::shared_ptr< GlobalEstimator<PointT> const> ConstPtr;
     };
 }
 
-
-#endif /* REC_FRAMEWORK_ESTIMATOR_H_ */

@@ -11,7 +11,7 @@
 
 namespace po = boost::program_options;
 
-//-do_erosion 1 -radius 0.005 -dot_product 0.99 -normal_method 0 -chop_z 2 -transfer_latest_only 0 -do_sift_based_camera_pose_estimation 0 -scenes_dir /media/Data/datasets/TUW/test_set -input_mask_dir /home/thomas/Desktop/test -output_dir /home/thomas/Desktop/out_test/ -visualize 1
+//--do_erosion 1 --radius 0.005 --dot_product 0.99 --normal_method 0 --chop_z 2 --transfer_latest_only 0 --scenes_dir /media/Data/datasets/TUW/test_set --input_mask_dir /media/Data/datasets/TUW/incremental_object_segmentation/ground_truth_for_first_frame_only --output_dir /home/thomas/Desktop/out_test/ -v
 
 int
 main (int argc, char ** argv)
@@ -42,7 +42,6 @@ main (int argc, char ** argv)
             ("ratio", po::value<double>( &m.param_.ratio_supervoxel_ )->default_value( m.param_.ratio_supervoxel_ ), "")
             ("do_erosion", po::value<bool>( &m.param_.do_erosion_ )->default_value( m.param_.do_erosion_ ), "")
             ("do_mst_refinement", po::value<bool>( &m.param_.do_mst_refinement_ )->default_value( m.param_.do_mst_refinement_ ), "")
-            ("do_sift_based_camera_pose_estimation", po::value<bool>( &m.param_.do_sift_based_camera_pose_estimation_ )->default_value( m.param_.do_sift_based_camera_pose_estimation_ ), "")
             ("transfer_latest_only", po::value<bool>( &m.param_.transfer_indices_from_latest_frame_only_ )->default_value( m.param_.transfer_indices_from_latest_frame_only_ ), "")
             ("chop_z,z", po::value<double>( &m.param_.chop_z_ )->default_value( m.param_.chop_z_ ), "Cut-off distance of the input clouds with respect to the camera. Points further away than this distance will be ignored.")
             ("normal_method", po::value<int>( &m.param_.normal_method_ )->default_value( m.param_.normal_method_ ), "")
@@ -74,8 +73,6 @@ main (int argc, char ** argv)
         return false;
     }
 
-    m.initSIFT();
-
     v4r::io::createDirIfNotExist(output_dir);
 
 
@@ -86,16 +83,16 @@ main (int argc, char ** argv)
       param_file << "--" << it.first << " ";
 
       auto& value = it.second.value();
-      if (auto v = boost::any_cast<double>(&value))
-        param_file << std::setprecision(3) << *v;
-      else if (auto v = boost::any_cast<std::string>(&value))
-        param_file << *v;
-      else if (auto v = boost::any_cast<bool>(&value))
-        param_file << *v;
-      else if (auto v = boost::any_cast<int>(&value))
-        param_file << *v;
-      else if (auto v = boost::any_cast<size_t>(&value))
-        param_file << *v;
+      if (auto val = boost::any_cast<double>(&value))
+        param_file << std::setprecision(3) << *val;
+      else if (auto val2 = boost::any_cast<std::string>(&value))
+        param_file << *val2;
+      else if (auto val3 = boost::any_cast<bool>(&value))
+        param_file << *val3;
+      else if (auto val4 = boost::any_cast<int>(&value))
+        param_file << *val4;
+      else if (auto val5 = boost::any_cast<size_t>(&value))
+        param_file << *val5;
       else
         param_file << "error";
 

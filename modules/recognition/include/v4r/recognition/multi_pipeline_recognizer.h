@@ -21,203 +21,111 @@
  *
  ******************************************************************************/
 
-#ifndef MULTI_PIPELINE_RECOGNIZER_H_
-#define MULTI_PIPELINE_RECOGNIZER_H_
+#pragma once
 
-#include "recognizer.h"
-#include "local_recognizer.h"
-#include <v4r/common/graph_geometric_consistency.h>
+#include <v4r/recognition/recognition_pipeline.h>
 #include <omp.h>
 
 namespace v4r
 {
-    template<typename PointT>
-    class V4R_EXPORTS MultiRecognitionPipeline : public Recognizer<PointT>
-    {
-    public:
-        class V4R_EXPORTS Parameter : public Recognizer<PointT>::Parameter
-        {
-        public:
-            using Recognizer<PointT>::Parameter::icp_iterations_;
-            using Recognizer<PointT>::Parameter::icp_type_;
-            using Recognizer<PointT>::Parameter::voxel_size_icp_;
-            using Recognizer<PointT>::Parameter::normal_computation_method_;
-            using Recognizer<PointT>::Parameter::merge_close_hypotheses_;
-            using Recognizer<PointT>::Parameter::merge_close_hypotheses_dist_;
-            using Recognizer<PointT>::Parameter::merge_close_hypotheses_angle_;
+template<typename PointT>
+class V4R_EXPORTS MultiRecognitionPipeline : public RecognitionPipeline<PointT>
+{
+private:
+    using RecognitionPipeline<PointT>::elapsed_time_;
+    using RecognitionPipeline<PointT>::scene_;
+    using RecognitionPipeline<PointT>::scene_normals_;
+    using RecognitionPipeline<PointT>::m_db_;
+    using RecognitionPipeline<PointT>::normal_estimator_;
+    using RecognitionPipeline<PointT>::obj_hypotheses_;
+    using RecognitionPipeline<PointT>::table_plane_;
+    using RecognitionPipeline<PointT>::table_plane_set_;
+    using RecognitionPipeline<PointT>::vis_param_;
 
-            bool save_hypotheses_;
+    std::vector<typename RecognitionPipeline<PointT>::Ptr > recognition_pipelines_;
 
-            Parameter(
-                    bool save_hypotheses = false
-                    )
-                : Recognizer<PointT>::Parameter(),
-                  save_hypotheses_ ( save_hypotheses )
-            {}
-        }param_;
+    omp_lock_t rec_lock_;
 
-      protected:
-        std::vector<typename boost::shared_ptr<Recognizer<PointT> > > recognizers_;
+    /**
+     * @brief recognize
+     */
+    void
+    do_recognize();
 
-      private:
-        using Recognizer<PointT>::scene_;
-        using Recognizer<PointT>::scene_normals_;
-        using Recognizer<PointT>::models_;
-        using Recognizer<PointT>::transforms_;
-        using Recognizer<PointT>::hv_algorithm_;
-        using Recognizer<PointT>::poseRefinement;
-        using Recognizer<PointT>::hypothesisVerification;
+public:
+    MultiRecognitionPipeline() { }
 
-        typedef typename pcl::PointCloud<PointT>::Ptr PointTPtr;
-        typedef typename pcl::PointCloud<PointT>::ConstPtr ConstPointTPtr;
-
-        typedef Model<PointT> ModelT;
-        typedef boost::shared_ptr<ModelT> ModelTPtr;
-        std::vector<pcl::PointIndices> segmentation_indices_;
-        omp_lock_t rec_lock_;
-
-        typename boost::shared_ptr<GraphGeometricConsistencyGrouping<PointT, PointT> > cg_algorithm_;  /// @brief algorithm for correspondence grouping
-        typename pcl::PointCloud<PointT>::Ptr scene_keypoints_; /// @brief keypoints of the scene
-        pcl::PointCloud<pcl::Normal>::Ptr scene_kp_normals_;
-        std::map<std::string, ObjectHypothesis<PointT> > obj_hypotheses_;   /// @brief stores feature correspondences
-
-        /**
-         * @brief removes all scene keypoints not having a correspondence in the model database and adapt correspondences indices accordingly
+    /**
+         * @brief initialize the recognizer (extract features, create FLANN,...)
+         * @param[in] path to model database. If training directory exists, will load trained model from disk; if not, computed features will be stored on disk (in each
+         * object model folder, a feature folder is created with data)
+         * @param[in] retrain if set, will re-compute features and store to disk, no matter if they already exist or not
          */
-        void
-        compress()
+    void
+    initialize(const std::string &trained_dir = "", bool retrain = false);
+
+
+    /**
+     * @brief oh_tmp
+     * @param rec recognition pipeline (local or global)
+     */
+    void
+    addRecognitionPipeline(typename RecognitionPipeline<PointT>::Ptr & rec)
+    {
+        recognition_pipelines_.push_back(rec);
+    }
+
+
+    /**
+         * @brief needNormals
+         * @return true if normals are needed, false otherwise
+         */
+    bool
+    needNormals() const
+    {
+        for(size_t r_id=0; r_id < recognition_pipelines_.size(); r_id++)
         {
-            std::vector<bool> kp_has_correspondence(scene_keypoints_->points.size(), false);
-            for (const auto &oh : obj_hypotheses_) {
-                for (const auto &corr : oh.second.model_scene_corresp_) {
-                    kp_has_correspondence[corr.index_match] = true;
-                }
-            }
-
-            std::vector<int> lut (scene_keypoints_->points.size(), -1);
-            size_t kept=0;
-            for(size_t i=0; i<scene_keypoints_->points.size(); i++) {
-                if( kp_has_correspondence[i] ) {
-                    lut[i] = kept;
-                    scene_keypoints_->points[kept] = scene_keypoints_->points[i];
-                    scene_kp_normals_->points[kept] = scene_kp_normals_->points[i];
-                    kept++;
-                }
-            }
-            scene_keypoints_->points.resize(kept);
-            scene_keypoints_->width = kept;
-            scene_kp_normals_->points.resize(kept);
-            scene_kp_normals_->width = kept;
-
-            // adapt correspondences
-            for (auto &oh : obj_hypotheses_) {
-                for (auto &corr : oh.second.model_scene_corresp_) {
-                    corr.index_match = lut[corr.index_match];
-                }
-            }
+            if(recognition_pipelines_[r_id]->needNormals())
+                return true;
         }
+        return false;
+    }
 
-        void
-        callIndiviualRecognizer(Recognizer<PointT> &rec);
+    /**
+     * @brief getFeatureType
+     * @return
+     */
+    size_t
+    getFeatureType() const
+    {
+        size_t feat_type = 0;
+        for(size_t r_id=0; r_id < recognition_pipelines_.size(); r_id++)
+            feat_type += recognition_pipelines_[r_id]->getFeatureType();
 
-        void mergeStuff(std::map<std::string, ObjectHypothesis<PointT> > &oh_m,
-                         const std::vector<ModelTPtr> &models,
-                         const std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> > &transforms,
-                         const pcl::PointCloud<PointT> &scene_kps,
-                         const pcl::PointCloud<pcl::Normal> &scene_kp_normals);
-      public:
-        MultiRecognitionPipeline (const Parameter &p = Parameter()) : Recognizer<PointT>(p)
-        {
-            param_ = p;
-        }
+        return feat_type;
+    }
 
-        MultiRecognitionPipeline(int argc, char **argv);
+    /**
+     * @brief requiresSegmentation
+     * @return
+     */
+    bool
+    requiresSegmentation() const
+    {
+        bool ret_value = false;
+        for(size_t i=0; (i < recognition_pipelines_.size()) && !ret_value; i++)
+            ret_value = recognition_pipelines_[i]->requiresSegmentation();
 
-        void setSaveHypotheses(bool set_save_hypotheses)
-        {
-            param_.save_hypotheses_ = set_save_hypotheses;
-        }
+        return ret_value;
+    }
 
-        void
-        getSavedHypotheses(std::map<std::string, ObjectHypothesis<PointT> > & hypotheses) const
-        {
-          hypotheses = obj_hypotheses_;
-        }
+    std::vector<typename RecognitionPipeline<PointT>::Ptr >
+    getRecognitionPipelines() const
+    {
+        return recognition_pipelines_;
+    }
 
-        bool
-        getSaveHypothesesParam() const
-        {
-            return param_.save_hypotheses_;
-        }
-
-        void
-        getKeypointCloud(PointTPtr & keypoint_cloud) const
-        {
-          keypoint_cloud = scene_keypoints_;
-        }
-
-        void
-        getKeyPointNormals(pcl::PointCloud<pcl::Normal>::Ptr & kp_normals) const
-        {
-            kp_normals = scene_kp_normals_;
-        }
-
-        bool
-        initialize(bool force_retrain = false);
-
-        void
-        correspondenceGrouping();
-
-        void
-        getPoseRefinement( const std::vector<ModelTPtr> &models,
-                           std::vector<Eigen::Matrix4f, Eigen::aligned_allocator<Eigen::Matrix4f> > &transforms);
-
-        void recognize();
-
-        void addRecognizer(typename boost::shared_ptr<Recognizer<PointT> > & rec)
-        {
-          recognizers_.push_back(rec);
-        }
-
-        void clearRecognizers()
-        {
-            recognizers_.clear();
-            obj_hypotheses_.clear();
-        }
-
-        void
-        setFeatAndKeypoints(const std::vector<std::vector<float> > & signatures,
-                            const std::vector<int> & keypoint_indices,
-                            size_t feature_type)
-        {
-          for (size_t i=0; i < recognizers_.size(); i++)
-          {
-              if(recognizers_[i]->getFeatureType() == feature_type)
-              {
-                  boost::shared_ptr<LocalRecognitionPipeline<PointT> > cast_local_recognizer
-                          = boost::static_pointer_cast<LocalRecognitionPipeline<PointT> > (recognizers_[i]);
-                  cast_local_recognizer->setFeatAndKeypoints(signatures, keypoint_indices);
-              }
-          }
-        }
-
-        void
-        setCGAlgorithm (const typename boost::shared_ptr<GraphGeometricConsistencyGrouping<PointT, PointT> > & alg)
-        {
-          cg_algorithm_ = alg;
-        }
-
-        bool isSegmentationRequired() const;
-
-        typename boost::shared_ptr<Source<PointT> >
-        getDataSource () const;
-
-        void
-        setSegmentation(const std::vector<pcl::PointIndices> & ind)
-        {
-          segmentation_indices_ = ind;
-        }
-
-    };
+    typedef boost::shared_ptr< MultiRecognitionPipeline<PointT> > Ptr;
+    typedef boost::shared_ptr< MultiRecognitionPipeline<PointT> const> ConstPtr;
+};
 }
-#endif /* MULTI_PIPELINE_RECOGNIZER_H_ */
